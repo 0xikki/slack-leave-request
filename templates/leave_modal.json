@@ -1,0 +1,182 @@
+{
+  "type": "modal",
+  "callback_id": "leave_request_modal",
+  "title": {
+    "type": "plain_text",
+    "text": "Submit Leave Request"
+  },
+  "submit": {
+    "type": "plain_text",
+    "text": "Submit"
+  },
+  "close": {
+    "type": "plain_text",
+    "text": "Cancel"
+  },
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Please fill out your leave request details below:*\n_Note: All times are based on UK work hours (9 AM to 5 PM)_"
+      }
+    },
+    {
+      "type": "input",
+      "block_id": "leave_dates",
+      "element": {
+        "type": "datepicker",
+        "placeholder": {
+          "type": "plain_text",
+          "text": "Select start date"
+        },
+        "action_id": "start_date"
+      },
+      "label": {
+        "type": "plain_text",
+        "text": "Start Date"
+      }
+    },
+    {
+      "type": "input",
+      "block_id": "leave_end_date",
+      "element": {
+        "type": "datepicker",
+        "placeholder": {
+          "type": "plain_text",
+          "text": "Select end date"
+        },
+        "action_id": "end_date"
+      },
+      "label": {
+        "type": "plain_text",
+        "text": "End Date (Optional)"
+      },
+      "optional": true
+    },
+    {
+      "type": "input",
+      "block_id": "leave_type",
+      "element": {
+        "type": "static_select",
+        "placeholder": {
+          "type": "plain_text",
+          "text": "Select leave type"
+        },
+        "options": [
+          {
+            "text": {
+              "type": "plain_text",
+              "text": "Sick Leave"
+            },
+            "value": "sick"
+          },
+          {
+            "text": {
+              "type": "plain_text",
+              "text": "Emergency Leave"
+            },
+            "value": "emergency"
+          },
+          {
+            "text": {
+              "type": "plain_text",
+              "text": "PTO"
+            },
+            "value": "pto"
+          },
+          {
+            "text": {
+              "type": "plain_text",
+              "text": "Holiday"
+            },
+            "value": "holiday"
+          },
+          {
+            "text": {
+              "type": "plain_text",
+              "text": "Offset"
+            },
+            "value": "offset"
+          }
+        ],
+        "action_id": "leave_type_select"
+      },
+      "label": {
+        "type": "plain_text",
+        "text": "Leave Type"
+      }
+    },
+    {
+      "type": "input",
+      "block_id": "leave_reason",
+      "element": {
+        "type": "plain_text_input",
+        "multiline": true,
+        "action_id": "reason_text",
+        "placeholder": {
+          "type": "plain_text",
+          "text": "Please provide details about your leave request"
+        }
+      },
+      "label": {
+        "type": "plain_text",
+        "text": "Reason for Leave"
+      }
+    },
+    {
+      "type": "input",
+      "block_id": "tasks_coverage",
+      "element": {
+        "type": "plain_text_input",
+        "multiline": true,
+        "action_id": "tasks_text",
+        "placeholder": {
+          "type": "plain_text",
+          "text": "List any important tasks that need coverage during your absence"
+        }
+      },
+      "label": {
+        "type": "plain_text",
+        "text": "Tasks to be Covered"
+      }
+    },
+    {
+      "type": "input",
+      "block_id": "covering_person",
+      "element": {
+        "type": "users_select",
+        "placeholder": {
+          "type": "plain_text",
+          "text": "Select person covering your tasks"
+        },
+        "action_id": "covering_user_select"
+      },
+      "label": {
+        "type": "plain_text",
+        "text": "Person Covering"
+      }
+    },
+    {
+      "type": "input",
+      "block_id": "supporting_docs",
+      "element": {
+        "type": "plain_text_input",
+        "action_id": "docs_text",
+        "placeholder": {
+          "type": "plain_text",
+          "text": "Add links to any supporting documents"
+        }
+      },
+      "label": {
+        "type": "plain_text",
+        "text": "Supporting Documents"
+      },
+      "optional": true,
+      "hint": {
+        "type": "plain_text",
+        "text": "Please provide links to any relevant documents (e.g. doctor's note, travel itinerary)"
+      }
+    }
+  ]
+} 

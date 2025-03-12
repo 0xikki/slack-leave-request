@@ -1,0 +1,87 @@
+---
+description: Apply these rules when creating the project
+globs:
+alwaysApply: true
+---
+## Project Overview
+
+*   **Type:** cursor_project_rules
+*   **Description:** I want to build a time-off/leave request/PTO system that utilizes mainly Slack. This system allows users to type a slash command (/leave) in Slack to open an interactive modal for submitting leave requests.
+*   **Primary Goal:** Create a seamless, Slack-integrated leave request system where users can quickly submit requests and receive notifications based entirely on Slack interactions. Administrators review requests via designated Slack channels and respond through approval or denial modals.
+
+## Project Structure
+
+### Framework-Specific Routing
+
+*   **Directory Rules:**
+
+    *   **slack_api (Latest):** Route logic is driven by Slack slash commands. When a user types `/leave`, the Slack API triggers the corresponding Python handler which renders a modal using Slack Block Kit. This enforces a clear separation between command input and modal display.
+    *   Example: The `/leave` command is intercepted by a dedicated endpoint in the Python backend that processes the command and displays the modal interface.
+    *   Example: Admin review actions are routed through Slack’s interactive message callbacks, leading to secondary modals for denial reasons when necessary.
+
+### Core Directories
+
+*   **Versioned Structure:**
+
+    *   **src/**: Contains the core Python modules responsible for handling Slack interactions, processing leave requests, and managing notification workflows. This directory represents the main logic and ties directly into Slack API webhooks.
+    *   **cursor/**: Hosts configuration files and AI-powered coding scripts that aid in rapid development and maintenance, leveraging the Cursor IDE’s advanced features.
+
+### Key Files
+
+*   **Stack-Versioned Patterns:**
+
+    *   **src/main.py:** The central entry point for processing Slack events and slash commands, ensuring that the `/leave` command triggers the modal display.
+    *   **cursor/config.json:** Contains configuration details such as administrator Slack IDs and deployment settings (e.g., Vultr deployment credentials).
+
+## Tech Stack Rules
+
+*   **Version Enforcement:**
+
+    *   **slack_api@latest:** All Slack interactions must adhere to the latest Slack API conventions, particularly the use of Block Kit for rendering modals and ensuring responses occur within Slack’s messaging framework.
+    *   **cursor (Advanced IDE):** Use real-time AI-powered suggestions and code analysis to maintain best practices and ensure consistency across the project.
+    *   **python@3.9+ (or latest LTS):** Follow strong Python standards including PEP8 styling, robust error handling, and modular code organization for handling Slack webhooks and request processing.
+
+## PRD Compliance
+
+*   **Non-Negotiable:**
+
+    *   "The system operates entirely via Slack interactions. Users initiate leave requests with the `/leave` command, and all reviews, approvals, and denials are handled within Slack channels." This mandates that no separate web interface or external system is introduced in this version.
+
+## App Flow Integration
+
+*   **Stack-Aligned Flow:**
+
+    *   **Slack Command Flow:** The `/leave` command triggers a Python handler which renders a Slack modal. This modal collects leave details (dates, reason, leave type, tasks, and coverage information) and even allows attachment of supporting documents. Upon submission, the request is routed to a designated Slack channel for admin review. For approvals, a notification is pushed back to the user; for denials, an additional modal is displayed to collect and relay a denial reason.
+
+## Best Practices
+
+*   **slack_api**
+
+    *   Utilize Slack Block Kit efficiently to create intuitive and responsive modals.
+    *   Handle interactive callbacks with clear and secure logic, ensuring authenticity of admin actions via Slack channel membership or pre-configured Slack IDs.
+    *   Respect API rate limits and implement exponential backoff where needed.
+
+*   **cursor**
+
+    *   Leverage AI-driven code suggestions to enforce consistency and adherence to project standards.
+    *   Maintain clear documentation and inline comments to describe AI and manual code contributions.
+    *   Ensure that development configurations (e.g., admin ID lists) remain up-to-date and version-controlled.
+
+*   **python**
+
+    *   Follow PEP8 standards and modular design patterns to organize Slack event handling and modal logic.
+    *   Employ robust error handling and logging to capture any anomalies during Slack interactions.
+    *   Design unit tests around command and callback routes to ensure reliability in live deployment.
+
+## Rules
+
+*   Derive folder/file patterns directly from tech stack versions as defined (e.g., maintain separate directories for core logic and AI tool integrations).
+
+*   Since the implementation is based on Slack’s command and callback system, enforce that all interactive elements (like modals) follow Slack’s Block Kit specifications.
+
+*   If using Slack API in this system:
+
+    *   Use the `/leave` command exclusively for triggering leave requests.
+    *   For admin reviews, ensure that only designated Slack channel members or configured Slack IDs can trigger approval or denial actions.
+
+*   Never mix version patterns: Do not introduce web-based UI structures (like traditional pages or nested routes) when the entire workflow is designed to occur within Slack.

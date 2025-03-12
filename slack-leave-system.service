@@ -1,0 +1,16 @@
+[Unit]
+Description=Slack Leave Request System
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/slack-leave-system
+Environment="PATH=/var/www/slack-leave-system/venv/bin"
+EnvironmentFile=/var/www/slack-leave-system/.env
+ExecStart=/var/www/slack-leave-system/venv/bin/gunicorn -c gunicorn.conf.py src.app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target 
