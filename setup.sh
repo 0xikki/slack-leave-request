@@ -11,11 +11,14 @@ ufw --force enable
 # Create application directory and copy files
 mkdir -p /var/www/slack-leave-system/src
 mkdir -p /var/www/slack-leave-system/src/slack
+mkdir -p /var/log/slack-leave-system
 
 # Copy source files
 cp -r /root/slack-leave-request/src/*.py /var/www/slack-leave-system/src/
 cp -r /root/slack-leave-request/src/slack/*.py /var/www/slack-leave-system/src/slack/
 cp /root/slack-leave-request/requirements.txt /var/www/slack-leave-system/
+cp /root/slack-leave-request/setup.py /var/www/slack-leave-system/
+cp /root/slack-leave-request/.env /var/www/slack-leave-system/
 cp /root/slack-leave-request/nginx.conf /etc/nginx/sites-available/slack-leave-system
 cp /root/slack-leave-request/gunicorn.conf.py /var/www/slack-leave-system/
 
@@ -24,6 +27,7 @@ cd /var/www/slack-leave-system
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+pip install -e .  # Install our package in development mode
 
 # Configure Nginx
 ln -sf /etc/nginx/sites-available/slack-leave-system /etc/nginx/sites-enabled/
@@ -44,7 +48,10 @@ User=www-data
 Group=www-data
 WorkingDirectory=/var/www/slack-leave-system
 Environment="PATH=/var/www/slack-leave-system/venv/bin"
+EnvironmentFile=/var/www/slack-leave-system/.env
 ExecStart=/var/www/slack-leave-system/venv/bin/gunicorn -c gunicorn.conf.py src.app:app
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
@@ -52,12 +59,9 @@ EOL
 
 # Set permissions
 chown -R www-data:www-data /var/www/slack-leave-system
+chown -R www-data:www-data /var/log/slack-leave-system
 
 # Start and enable service
 systemctl daemon-reload
-systemctl start slack-leave-system
+systemctl restart slack-leave-system
 systemctl enable slack-leave-system
-
-# Set up logs
-mkdir -p /var/log/slack-leave-system
-chown www-data:www-data /var/log/slack-leave-system

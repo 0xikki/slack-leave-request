@@ -5,8 +5,6 @@ import hashlib
 import time
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-from src.slack_commands import SlackCommandHandler
-from src.slack_actions import SlackActionsHandler
 import logging
 from logging.config import dictConfig
 from pythonjsonlogger import jsonlogger
@@ -15,6 +13,7 @@ from functools import wraps
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from slack.slack_commands import SlackCommandsHandler
+from slack.slack_actions import SlackActionsHandler
 
 # Load environment variables
 load_dotenv()
@@ -42,8 +41,6 @@ dictConfig({
 
 # Initialize Flask app
 app = Flask(__name__)
-slack_handler = SlackCommandHandler()
-slack_actions_handler = SlackActionsHandler()
 
 # Initialize Slack client
 slack_token = os.getenv("SLACK_BOT_TOKEN")
@@ -139,7 +136,7 @@ def slack_interactivity():
         payload = json.loads(form_data['payload'])
         
         if payload['type'] == 'view_submission':
-            response = slack_handler.handle_modal_submission(payload)
+            response = actions_handler.handle_action(payload)
             return jsonify(response)
             
         return jsonify({"ok": False, "error": "Unsupported interaction type"}), 400
@@ -158,18 +155,7 @@ def handle_actions():
     try:
         # Parse the request payload
         payload = json.loads(request.form["payload"])
-        
-        # Handle different types of actions
-        if payload.get("type") == "block_actions":
-            # Handle button clicks (approve/deny)
-            response = slack_actions_handler.handle_action(payload)
-        elif payload.get("type") == "view_submission":
-            # Handle modal submissions (denial reason)
-            response = slack_actions_handler.handle_denial_submission(payload)
-        else:
-            response = {"ok": False, "error": "Unsupported action type"}
-        
-        return jsonify(response)
+        return actions_handler.handle_action(payload)
         
     except Exception as e:
         app.logger.error(f"Error handling action: {str(e)}")
