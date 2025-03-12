@@ -12,6 +12,9 @@ from logging.config import dictConfig
 from pythonjsonlogger import jsonlogger
 from slack_sdk.signature import SignatureVerifier
 from functools import wraps
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
+from slack.slack_commands import SlackCommandsHandler
 
 # Load environment variables
 load_dotenv()
@@ -41,6 +44,15 @@ dictConfig({
 app = Flask(__name__)
 slack_handler = SlackCommandHandler()
 slack_actions_handler = SlackActionsHandler()
+
+# Initialize Slack client
+slack_token = os.getenv("SLACK_BOT_TOKEN")
+if not slack_token:
+    raise ValueError("SLACK_BOT_TOKEN environment variable is not set")
+
+slack_client = WebClient(token=slack_token)
+actions_handler = SlackActionsHandler(slack_client)
+commands_handler = SlackCommandsHandler(slack_client)
 
 def verify_slack_request(f):
     """Decorator to verify that the request is coming from Slack."""
@@ -113,20 +125,11 @@ def verify_slack_requests():
 @app.route('/slack/commands', methods=['POST'])
 def slack_commands():
     """Handle Slack slash commands."""
-    form_data = dict(request.form)
-    command = form_data.get('command')
-    user_id = form_data.get('user_id')
-    trigger_id = form_data.get('trigger_id')
-    
-    if command != '/leave':
-        return jsonify({"ok": False, "error": "Invalid command"}), 400
-        
-    response = slack_handler.handle_leave_command(user_id=user_id, trigger_id=trigger_id)
-    
-    if not response.get('ok'):
-        return jsonify(response), 400
-        
-    return jsonify(response)
+    try:
+        return commands_handler.handle_command(request.form)
+    except Exception as e:
+        app.logger.error(f"Error handling command: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/slack/interactivity', methods=['POST'])
 def slack_interactivity():
@@ -171,6 +174,17 @@ def handle_actions():
     except Exception as e:
         app.logger.error(f"Error handling action: {str(e)}")
         return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/slack/events", methods=["POST"])
+def slack_events():
+    """Handle Slack events and interactions"""
+    data = request.json
+    
+    # Handle URL verification challenge
+    if data.get("type") == "url_verification":
+        return jsonify({"challenge": data["challenge"]})
+    
+    return jsonify({"ok": True})
 
 if __name__ == '__main__':
     app.run(debug=os.getenv('FLASK_DEBUG', 'False').lower() == 'true') 

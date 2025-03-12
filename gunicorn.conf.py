@@ -1,13 +1,20 @@
 import multiprocessing
 
 # Gunicorn configuration for production
-bind = "0.0.0.0:8000"
+bind = "127.0.0.1:8000"
 workers = multiprocessing.cpu_count() * 2 + 1
 worker_class = "sync"
-timeout = 120
-keepalive = 5
-errorlog = "logs/gunicorn-error.log"
-accesslog = "logs/gunicorn-access.log"
+worker_connections = 1000
+timeout = 30
+keepalive = 2
+
+# Access log - records incoming HTTP requests
+accesslog = "/var/log/slack-leave-system/access.log"
+# Error log - records Gunicorn server goings-on
+errorlog = "/var/log/slack-leave-system/error.log"
+# Whether to send Django output to the error log 
+capture_output = True
+# How verbose the Gunicorn error logs should be 
 loglevel = "info"
 
 # SSL Configuration (if needed)
