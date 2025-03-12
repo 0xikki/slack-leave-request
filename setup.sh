@@ -12,6 +12,11 @@ ufw --force enable
 mkdir -p /var/www/slack-leave-system
 cd /var/www/slack-leave-system
 
+# Copy necessary files from git repository
+cp /root/slack-leave-request/requirements.txt .
+cp /root/slack-leave-request/nginx.conf .
+cp /root/slack-leave-request/gunicorn.conf.py .
+
 # Set up Python environment
 python3 -m venv venv
 source venv/bin/activate
