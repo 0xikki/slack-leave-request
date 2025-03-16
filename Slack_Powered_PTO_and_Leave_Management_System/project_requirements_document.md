@@ -10,7 +10,7 @@ The system's objectives include facilitating quick user interactions, transparen
 
 **In-Scope:**
 
-*   Slack-based interaction through the slash command `/leave`.
+*   Slack-based interaction through the slash command `/timeoff`.
 
 *   A modal UI for data input, including:
 
@@ -38,7 +38,7 @@ The system's objectives include facilitating quick user interactions, transparen
 
 ### User Initiation
 
-*   **Step 1:** User types `/leave` in Slack to open the leave request modal.
+*   **Step 1:** User types `/timeoff` in Slack to open the leave request modal.
 *   **Step 2:** User enters leave details: the date(s) of absence, reason for the leave, type of leave, tasks for coverage, and the covering colleague, including uploading any relevant documents.
 *   **Step 3:** User submits their request, automatically redirecting it to a specific Slack channel for admin review.
 
@@ -55,7 +55,7 @@ This Slack-only workflow maintains a structured, easy-to-follow process bolstere
 
 *   **Slack Integration:**
 
-    *   Leveraging slash command (`/leave`) to engage with Slack’s API.
+    *   Leveraging slash command (`/timeoff`) to engage with Slack’s API.
     *   Maintain all interactions within Slack's environment for user ease.
 
 *   **Dynamic Modal Interface:**

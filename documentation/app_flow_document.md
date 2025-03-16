@@ -2,30 +2,91 @@
 
 ## Introduction
 
-This application is built as a Slack-integrated time-off and leave request system. Its main goal is to allow users to quickly submit leave requests using Slack, and for designated administrators to review, approve, or deny these requests right within the Slack environment. The experience is completely self-contained in Slack, meaning users will never need to leave their familiar workspace. The design is themed in aubergine to match Slack’s native styling and clearly communicates that input times are based on UK working hours (9 am to 5 pm). Overall, the application streamlines the process of taking leave, ensuring that all interactions — from initiation to notification — are efficient and simple.
+This application is built as a Slack-integrated time-off and leave request system. Its main goal is to allow users to quickly submit leave requests using Slack, and for designated department heads and HR to review, approve, or deny these requests right within the Slack environment. The experience is completely self-contained in Slack, meaning users will never need to leave their familiar workspace. Overall, the application streamlines the process of taking leave, ensuring that all interactions — from initiation to notification — are efficient and simple.
 
 ## Onboarding and Sign-In/Sign-Up
 
-Since the system is designed exclusively for Slack, there is no traditional onboarding process involving sign-ups or sign-ins through a web interface. Instead, any user who is already part of the Slack workspace can simply start using the system by typing the slash command /leave. The authentication and user identification happen automatically via Slack’s own user management. Users do not need to sign out or recover passwords within the application because all credentials are managed by Slack. In this way, the onboarding process is as seamless as typing the command into Slack and immediately seeing the corresponding modal interface.
+Since the system is designed exclusively for Slack, there is no traditional onboarding process involving sign-ups or sign-ins through a web interface. Instead, any user who is already part of the Slack workspace can simply start using the system by typing the slash command `/timeoff`. The authentication and user identification happen automatically via Slack's own user management. Users do not need to sign out or recover passwords within the application because all credentials are managed by Slack. In this way, the onboarding process is as seamless as typing the command into Slack and immediately seeing the corresponding modal interface.
 
 ## Main Dashboard or Home Page
 
-When a user initiates the leave request process by typing /leave in any Slack channel, the system immediately brings up a modal window at the center of the screen. This modal acts as the main 'dashboard' for the leave request process. It presents the user with all the necessary fields to complete their request, such as date selection, type of leave, reason for leave, tasks that need coverage, and the person who will cover their responsibilities. The modal also provides an option for uploading supporting documents. There is clear guidance on what each field expects, and a note is displayed reminding users that the timing in the modal follows the UK working hours schedule. Navigation within the Slack workspace remains unchanged, but the focus is temporarily moved to the modal until the request is either submitted or cancelled.
+When a user initiates the leave request process by typing `/timeoff` in any Slack channel, the system immediately brings up a modal window at the center of the screen. This modal acts as the main 'dashboard' for the leave request process. It presents the user with all the necessary fields to complete their request, such as:
+- Date selection (start date)
+- Type of leave
+- Reason for leave
+- Tasks that need coverage
+- Person who will cover their responsibilities
+
+The modal provides clear guidance on what each field expects, with validation to ensure all required information is provided.
 
 ## Detailed Feature Flows and Page Transitions
 
-When a user types the /leave command, the first step is the immediate display of the leave request modal. In this modal, users can enter the specific dates they will be away, choosing either a single date or a range of dates if their leave spans multiple days. They are asked to provide a brief reason for the leave, pick the correct leave type from options like Sick, Emergency, PTO, Holiday, or Offset, and outline the tasks that need to be covered during their absence. Additionally, they can specify who will cover for them and upload any supporting documents that might be relevant to their leave. Once the details are filled in, the user submits the form and the system sends the request to a designated Slack channel that is monitored by administrating team members.
+When a user submits their leave request through the modal, the following workflow is triggered:
 
-After submission, the flow diverges into the admin review process. In the designated admin channel, the leave request appears for review. If an admin approves the request, Slack automatically sends a notification back to the original requester confirming the approval. If the request is denied, a secondary modal is automatically shown for the admin to input the reason for the denial. Once the admin finalizes a denial by entering the reason, the system notifies the requester with a clear message explaining the decision. This flow ensures that every step, from data collection to final decision, is fully connected and happens within Slack without extra navigation or page reloads.
+1. Initial Request:
+   - The system validates all required fields
+   - Upon successful validation, the request is routed based on the user's role
 
-## Settings and Account Management
+2. Routing Logic:
+   - For regular employees:
+     * Request is sent to their department head
+     * Department head receives a message with approve/reject buttons
+   - For department heads:
+     * Request is sent directly to the HR channel
+     * HR team receives a message with approve/reject buttons
 
-Since the application operates entirely within Slack, traditional settings and account management pages do not exist within the app. User settings such as personal information and notification preferences are managed by Slack itself. The only configuration that may be needed is on the backend where administrators or developers can input configuration details such as Slack IDs for admin membership. This configuration exists outside of and is not part of the end-user experience. However, on a backend level, system administrators might update configurations manually or via files to specify which Slack users have the authority to approve leave requests. Once these settings are updated, users simply return to their normal Slack workflow where they can issue the /leave command as needed.
+3. Approval Process:
+   - The approver (department head or HR) sees:
+     * Request details (type, dates, reason)
+     * Approve button (with confirmation dialog)
+     * Reject button (opens rejection reason modal)
+   
+4. Action Handling:
+   - On Approval:
+     * Original message is updated to show approved status
+     * Requester receives a notification of approval
+     * If department head approved, request is forwarded to HR
+   - On Rejection:
+     * Approver must provide a reason
+     * Original message is updated to show rejected status
+     * Requester receives a notification with the rejection reason
 
 ## Error States and Alternate Paths
 
-The system includes clear error handling within the modal interface. If a user enters invalid data, such as incorrect dates or omits a required field like the leave reason, the modal will guide the user with clear error messages, highlighting what needs to be corrected before submission can be allowed. In cases where connectivity might be lost or Slack experiences issues delaying the modal display or submission, the user is informed via immediate error dialogs, prompting them to retry the action. When an admin attempts a denial without providing a reason, a similar error prompt ensures that all required information is captured. In every case, clear feedback is given so that users understand what went wrong and can quickly return to the normal flow of usage.
+The system includes robust error handling at multiple levels:
+
+1. Modal Validation:
+   - Required fields are checked before submission
+   - Clear error messages guide users to fix issues
+   - Date validation ensures proper formatting
+
+2. Action Handling:
+   - Authorization checks prevent unauthorized approvals/rejections
+   - Network errors are caught and logged
+   - Users receive clear feedback if something goes wrong
+
+3. Process Safeguards:
+   - Confirmation dialogs prevent accidental approvals/rejections
+   - Rejection requires a reason to ensure clear communication
+   - Super admins can handle any request regardless of department
 
 ## Conclusion and Overall App Journey
 
-The overall user experience starts entirely within Slack, with users generating requests by simply typing /leave. They are then presented with a detailed modal to provide all necessary information for a leave request. Once submitted, the request is automatically channeled to a Slack group where designated admins are in charge of reviewing and approving or denying the application. An additional modal process handles denials by requiring a reason to be documented, ensuring that communication is transparent and informative. Throughout the journey, from the initial command to the final notification, every action is governed by clear instructions and immediate feedback. This coherent process simplifies leave management for employees while keeping the workload contained in the familiar Slack environment, achieving the primary goal of minimizing friction and facilitating prompt leave approval or denial notifications.
+The application provides a streamlined, Slack-native experience for leave management:
+
+1. Request Initiation:
+   - User types `/timeoff` in any channel
+   - Modal opens with required fields
+   - User fills in details and submits
+
+2. Review Process:
+   - Request routes to appropriate approver
+   - Approver reviews details and takes action
+   - System handles notifications and updates
+
+3. Completion:
+   - All parties receive appropriate notifications
+   - Message updates reflect current status
+   - Process completes entirely within Slack
+
+This end-to-end workflow minimizes friction while maintaining proper oversight and communication channels for leave management.

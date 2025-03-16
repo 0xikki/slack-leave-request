@@ -1,178 +1,403 @@
+"""
+Tests for the Slack actions handler.
+"""
 import pytest
-from unittest.mock import Mock, patch
-from src.slack_actions import SlackActionsHandler
+from unittest.mock import patch, MagicMock
+from src.slack.slack_actions import SlackActionsHandler
+import json
 
 @pytest.fixture
-def slack_actions_handler():
-    """Create a SlackActionsHandler instance for testing."""
-    return SlackActionsHandler()
+def mock_slack_client():
+    """Create a mock Slack client."""
+    return MagicMock()
 
-@pytest.fixture
-def sample_approval_payload():
-    """Create a sample approval action payload."""
-    return {
-        "user": {"id": "ADMIN123", "name": "admin.user"},
-        "actions": [{
-            "action_id": "approve_leave",
-            "value": "approve"
-        }],
-        "message": {
-            "blocks": [
-                {
-                    "type": "section",
-                    "fields": [
-                        {"text": "*Requester:*\n<@U123456>"},
-                        {"text": "*Type:*\nPTO"}
-                    ]
-                },
-                {
-                    "type": "section",
-                    "fields": [
-                        {"text": "*Start Date:*\nMarch 15, 2024"},
-                        {"text": "*End Date:*\nMarch 16, 2024"}
-                    ]
-                }
-            ]
+def test_handle_dept_head_approval(mock_slack_client):
+    """Test department head approval flow."""
+    handler = SlackActionsHandler(mock_slack_client)
+
+    # Mock department head check using actual department head ID
+    with patch('src.config.organization.is_department_head', return_value=True):
+        payload = {
+            "type": "block_actions",
+            "user": {"id": "U06M5QCCLN9"},  # Development and Architecture head
+            "actions": [{"action_id": "approve_leave", "value": "approve"}],
+            "message": {
+                "blocks": [
+                    {
+                        "type": "section",
+                        "fields": [
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Requester:*\n<@U06MKKWAWJX>"  # Team member
+                            },
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Type:*\nAnnual Leave"
+                            },
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Duration:*\n2024-03-20 to 2024-03-22"
+                            }
+                        ]
+                    }
+                ],
+                "ts": "1234567890.123456",
+                "channel": {"id": "C1234567890"}
+            }
         }
-    }
 
-@pytest.fixture
-def sample_denial_payload():
-    """Create a sample denial action payload."""
-    return {
-        "user": {"id": "ADMIN123", "name": "admin.user"},
-        "trigger_id": "test_trigger_123",
-        "actions": [{
-            "action_id": "deny_leave",
-            "value": "deny"
-        }],
-        "message": {
-            "blocks": [
-                {
-                    "type": "section",
-                    "fields": [
-                        {"text": "*Requester:*\n<@U123456>"},
-                        {"text": "*Type:*\nPTO"}
-                    ]
-                },
-                {
-                    "type": "section",
-                    "fields": [
-                        {"text": "*Start Date:*\nMarch 15, 2024"},
-                        {"text": "*End Date:*\nMarch 16, 2024"}
-                    ]
-                }
-            ]
+        result = handler.handle_action(payload)
+
+        assert result["response_action"] == "clear"
+        mock_slack_client.chat_update.assert_called_once()
+        mock_slack_client.chat_postMessage.assert_called_once()
+
+def test_handle_hr_approval(mock_slack_client):
+    """Test HR approval flow."""
+    handler = SlackActionsHandler(mock_slack_client)
+
+    # Mock HR member check using actual HR member ID
+    with patch('src.config.organization.load_admin_users', return_value=['U06PNMDFVQW']):
+        payload = {
+            "type": "block_actions",
+            "user": {"id": "U06PNMDFVQW"},  # HR member
+            "actions": [{"action_id": "approve_leave", "value": "approve"}],
+            "message": {
+                "blocks": [
+                    {
+                        "type": "section",
+                        "fields": [
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Requester:*\n<@U06MKKWAWJX>"  # Team member
+                            },
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Type:*\nAnnual Leave"
+                            },
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Duration:*\n2024-03-20 to 2024-03-22"
+                            }
+                        ]
+                    }
+                ],
+                "ts": "1234567890.123456",
+                "channel": {"id": "C1234567890"}
+            }
         }
-    }
 
-def test_handle_approval_action(slack_actions_handler, sample_approval_payload):
-    """Test handling of an approval action."""
-    with patch('src.slack_actions.WebClient') as mock_client_class:
-        mock_client = Mock()
-        mock_client_class.return_value = mock_client
-        mock_client.chat_postMessage.return_value = {"ok": True}
-        
-        # Set up the Slack token
-        with patch.dict('os.environ', {'SLACK_BOT_TOKEN': 'test_token'}):
-            slack_actions_handler.client = mock_client
-            response = slack_actions_handler.handle_action(sample_approval_payload)
-        
-        assert response["ok"] is True
-        mock_client.chat_postMessage.assert_called_once()
-        
-        # Verify notification was sent to the user
-        call_args = mock_client.chat_postMessage.call_args[1]
-        blocks_str = str(call_args["blocks"])
-        assert "approved" in blocks_str.lower()
-        assert "March 15, 2024" in blocks_str
-        assert "March 16, 2024" in blocks_str
-        assert "PTO" in blocks_str
+        result = handler.handle_action(payload)
 
-def test_handle_denial_action(slack_actions_handler, sample_denial_payload):
-    """Test handling of a denial action."""
-    with patch('src.slack_actions.WebClient') as mock_client_class:
-        mock_client = Mock()
-        mock_client_class.return_value = mock_client
-        mock_client.views_open.return_value = {"ok": True}
-        
-        # Set up the Slack token
-        with patch.dict('os.environ', {'SLACK_BOT_TOKEN': 'test_token'}):
-            slack_actions_handler.client = mock_client
-            response = slack_actions_handler.handle_action(sample_denial_payload)
-        
-        assert response["ok"] is True
-        mock_client.views_open.assert_called_once()
-        
-        # Verify denial modal was opened
-        call_args = mock_client.views_open.call_args[1]
-        view = call_args["view"]
-        assert view["type"] == "modal"
-        assert "Deny Leave Request" in str(view["title"])
-        assert "denial_reason" in str(view["blocks"])
+        assert result["response_action"] == "clear"
+        mock_slack_client.chat_update.assert_called_once()
+        mock_slack_client.chat_postMessage.assert_called_once()
 
-def test_handle_denial_submission(slack_actions_handler):
-    """Test handling of a denial reason submission."""
-    denial_submission = {
-        "user": {"id": "ADMIN123"},
+def test_handle_dept_head_rejection(mock_slack_client):
+    """Test department head rejection flow."""
+    handler = SlackActionsHandler(mock_slack_client)
+
+    with patch('src.config.organization.is_department_head', return_value=True):
+        payload = {
+            "type": "block_actions",
+            "user": {"id": "U06M5QCCLN9"},  # Development and Architecture head
+            "trigger_id": "trigger123",
+            "actions": [{"action_id": "reject_leave", "value": "reject"}],
+            "message": {
+                "blocks": [
+                    {
+                        "type": "section",
+                        "fields": [
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Requester:*\n<@U06MKKWAWJX>"  # Team member
+                            },
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Type:*\nAnnual Leave"
+                            },
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Duration:*\n2024-03-20 to 2024-03-22"
+                            }
+                        ]
+                    }
+                ],
+                "ts": "1234567890.123456",
+                "channel": {"id": "C1234567890"}
+            }
+        }
+
+        result = handler.handle_action(payload)
+
+        assert result["response_action"] == "clear"
+        mock_slack_client.views_open.assert_called_once()
+
+def test_handle_rejection_submission(mock_slack_client):
+    """Test handling of rejection reason submission."""
+    handler = SlackActionsHandler(mock_slack_client)
+
+    payload = {
+        "type": "view_submission",
+        "user": {"id": "U06M5QCCLN9"},  # Development and Architecture head
         "view": {
+            "callback_id": "rejection_modal",
+            "private_metadata": json.dumps({
+                "requester_id": "U06MKKWAWJX",
+                "channel_id": "C1234567890",
+                "message_ts": "1234567890.123456",
+                "leave_type": "Annual Leave",
+                "start_date": "2024-03-20",
+                "end_date": "2024-03-22"
+            }),
             "state": {
                 "values": {
-                    "denial_reason": {
-                        "denial_reason_input": {
-                            "value": "Resource constraints"
+                    "rejection_reason_block": {
+                        "rejection_reason": {
+                            "value": "Insufficient coverage"
                         }
                     }
                 }
-            },
-            "private_metadata": '{"requester_id": "U123456", "leave_type": "PTO", "start_date": "2024-03-15", "end_date": "2024-03-16"}'
+            }
         }
     }
-    
-    with patch('src.slack_actions.WebClient') as mock_client_class:
-        mock_client = Mock()
-        mock_client_class.return_value = mock_client
-        mock_client.chat_postMessage.return_value = {"ok": True}
-        
-        # Set up the Slack token
-        with patch.dict('os.environ', {'SLACK_BOT_TOKEN': 'test_token'}):
-            slack_actions_handler.client = mock_client
-            response = slack_actions_handler.handle_denial_submission(denial_submission)
-        
-        assert response["ok"] is True
-        mock_client.chat_postMessage.assert_called_once()
-        
-        # Verify denial notification was sent to the user
-        call_args = mock_client.chat_postMessage.call_args[1]
-        blocks_str = str(call_args["blocks"])
-        assert "denied" in blocks_str.lower()
-        assert "Resource constraints" in blocks_str
-        assert "March 15, 2024" in blocks_str
-        assert "March 16, 2024" in blocks_str
-        assert "PTO" in blocks_str
 
-def test_handle_invalid_action(slack_actions_handler):
-    """Test handling of an invalid action."""
-    invalid_payload = {
-        "user": {"id": "ADMIN123"},
-        "actions": [{
-            "action_id": "invalid_action",
-            "value": "invalid"
-        }]
+    result = handler.handle_view_submission(payload)
+
+    assert result["response_action"] == "clear"
+    mock_slack_client.chat_update.assert_called_once()
+    mock_slack_client.chat_postMessage.assert_called_once()
+
+def test_invalid_action(mock_slack_client):
+    """Test handling of invalid action."""
+    handler = SlackActionsHandler(mock_slack_client)
+
+    payload = {
+        "type": "block_actions",
+        "user": {"id": "U06M5QCCLN9"},
+        "actions": [{"action_id": "invalid_action", "value": "invalid"}]
     }
-    
-    response = slack_actions_handler.handle_action(invalid_payload)
-    
-    assert response["ok"] is False
-    assert "error" in response
-    assert "Invalid action" in response["error"]
 
-def test_handle_missing_message_content(slack_actions_handler, sample_approval_payload):
-    """Test handling of a payload with missing message content."""
-    del sample_approval_payload["message"]
+    result = handler.handle_action(payload)
+
+    assert result["response_action"] == "errors"
+    assert result["errors"]["action"] == "Invalid action"
+
+def test_unauthorized_approval(mock_slack_client):
+    """Test unauthorized approval attempt."""
+    handler = SlackActionsHandler(mock_slack_client)
+
+    # Mock checks to return False
+    with patch('src.config.organization.is_department_head', return_value=False), \
+         patch('src.config.organization.load_admin_users', return_value=['U999XYZ']):
+        payload = {
+            "type": "block_actions",
+            "user": {"id": "U06MKKWAWJX"},  # Regular team member
+            "actions": [{"action_id": "approve_leave", "value": "approve"}],
+            "message": {
+                "blocks": [
+                    {
+                        "type": "section",
+                        "fields": [
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Requester:*\n<@U06PNMDFVQW>"  # HR member
+                            },
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Type:*\nAnnual Leave"
+                            },
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Duration:*\n2024-03-20 to 2024-03-22"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+
+        result = handler.handle_action(payload)
+
+        assert result["response_action"] == "errors"
+        assert result["errors"]["action"] == "You are not authorized to perform this action"
+
+def test_error_handling(mock_slack_client):
+    """Test error handling in actions."""
+    handler = SlackActionsHandler(mock_slack_client)
+
+    # Mock authorization to pass but API call to fail
+    with patch('src.config.organization.is_department_head', return_value=True):
+        # Simulate API error
+        mock_slack_client.chat_update.side_effect = Exception("API Error")
+
+        payload = {
+            "type": "block_actions",
+            "user": {"id": "U06M5QCCLN9"},  # Development and Architecture head
+            "actions": [{"action_id": "approve_leave", "value": "approve"}],
+            "message": {
+                "blocks": [
+                    {
+                        "type": "section",
+                        "fields": [
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Requester:*\n<@U06MKKWAWJX>"  # Team member
+                            },
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Type:*\nAnnual Leave"
+                            },
+                            {
+                                "type": "mrkdwn",
+                                "text": "*Duration:*\n2024-03-20 to 2024-03-22"
+                            }
+                        ]
+                    }
+                ],
+                "ts": "1234567890.123456",
+                "channel": {"id": "C1234567890"}
+            }
+        }
+
+        result = handler.handle_action(payload)
+
+        assert result["response_action"] == "errors"
+        assert result["errors"]["action"] == "API Error: API Error"
+
+def test_cannot_approve_own_request(mock_slack_client):
+    """Test that a user cannot approve their own request."""
+    handler = SlackActionsHandler(mock_slack_client)
     
-    response = slack_actions_handler.handle_action(sample_approval_payload)
+    # Mock user is not an admin
+    with patch('src.config.organization.load_admin_users', return_value=[]):
+        payload = {
+            "type": "block_actions",
+            "user": {"id": "U06MKKWAWJX"},  # Regular team member
+            "actions": [{"action_id": "approve_leave"}],
+            "message": {
+                "type": "message",
+                "ts": "1234567890.123456",
+                "channel": {"id": "C1234567890"},
+                "blocks": [{
+                    "type": "section",
+                    "fields": [
+                        {
+                            "type": "mrkdwn",
+                            "text": "*Requester:*\n<@U06MKKWAWJX>"  # Same as approver
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": "*Type:*\nAnnual Leave"
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": "*Duration:*\n2024-03-20 to 2024-03-22"
+                        }
+                    ]
+                }]
+            }
+        }
+
+        result = handler.handle_action(payload)
+
+        assert result == {
+            "response_action": "errors",
+            "errors": {"action": "You cannot approve or reject your own request"}
+        }
+
+def test_admin_can_approve_own_request(mock_slack_client):
+    """Test that an admin can approve their own request."""
+    handler = SlackActionsHandler(mock_slack_client)
     
-    assert response["ok"] is False
-    assert "error" in response
-    assert "Missing message content" in response["error"] 
+    # Mock user is an admin
+    with patch('src.config.organization.load_admin_users', return_value=['U06PNMDFVQW']):
+        payload = {
+            "type": "block_actions",
+            "user": {"id": "U06PNMDFVQW"},  # HR member
+            "actions": [{"action_id": "approve_leave"}],
+            "message": {
+                "type": "message",
+                "ts": "1234567890.123456",
+                "channel": {"id": "C1234567890"},
+                "blocks": [{
+                    "type": "section",
+                    "fields": [
+                        {
+                            "type": "mrkdwn",
+                            "text": "*Requester:*\n<@U06PNMDFVQW>"  # Same as approver
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": "*Type:*\nAnnual Leave"
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": "*Duration:*\n2024-03-20 to 2024-03-22"
+                        }
+                    ]
+                }]
+            }
+        }
+
+        result = handler.handle_action(payload)
+
+        assert result == {"response_action": "clear"}
+        mock_slack_client.chat_update.assert_called_once()
+        mock_slack_client.chat_postMessage.assert_called_once()
+
+def test_handle_hr_rejection(mock_slack_client):
+    """Test HR rejection flow."""
+    handler = SlackActionsHandler(mock_slack_client)
+    
+    # Mock user is an admin
+    with patch('src.config.organization.load_admin_users', return_value=['U06PNMDFVQW']):
+        payload = {
+            "type": "block_actions",
+            "user": {"id": "U06PNMDFVQW"},  # HR member
+            "trigger_id": "trigger123",
+            "actions": [{"action_id": "reject_leave"}],
+            "message": {
+                "type": "message",
+                "ts": "1234567890.123456",
+                "channel": {"id": "C1234567890"},
+                "blocks": [{
+                    "type": "section",
+                    "fields": [
+                        {
+                            "type": "mrkdwn",
+                            "text": "*Requester:*\n<@U06MKKWAWJX>"  # Team member
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": "*Type:*\nAnnual Leave"
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": "*Duration:*\n2024-03-20 to 2024-03-22"
+                        }
+                    ]
+                }]
+            }
+        }
+
+        result = handler.handle_action(payload)
+
+        assert result == {"response_action": "clear"}
+        mock_slack_client.views_open.assert_called_once()
+
+def test_missing_message(mock_slack_client):
+    """Test handling of missing message in payload."""
+    handler = SlackActionsHandler(mock_slack_client)
+    payload = {
+        "type": "block_actions",
+        "user": {"id": "U06PNMDFVQW"},
+        "actions": [{"action_id": "approve_leave"}]
+    }
+
+    result = handler.handle_action(payload)
+
+    assert result == {
+        "response_action": "errors",
+        "errors": {"action": "Could not extract request details"}
+    }

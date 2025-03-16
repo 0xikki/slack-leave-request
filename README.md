@@ -4,12 +4,20 @@ A Slack-integrated leave request system that allows users to submit and manage l
 
 ## Features
 
-- Submit leave requests using `/leave` command in Slack
-- Interactive modal for leave request details
-- Admin approval workflow
-- Automatic notifications
-- Secure HTTPS endpoints
-- Full Slack Block Kit UI
+- Submit leave requests using `/timeoff` command in Slack
+- Interactive modal for submitting leave request details:
+  - Leave type selection (Vacation, Sick Leave, Personal)
+  - Start and end date selection
+  - Reason for leave
+- Admin approval workflow with:
+  - Instant notifications in admin channel
+  - One-click approve/reject buttons
+  - Rejection reason collection via modal
+- Automatic notifications for:
+  - Request submission confirmation
+  - Request approval/rejection status
+- Secure HTTPS endpoints with Slack request verification
+- Modern Slack Block Kit UI with interactive components
 
 ## Tech Stack
 
@@ -38,13 +46,29 @@ pip install -r requirements.txt
 3. Set up environment variables:
 ```bash
 cp .env.example .env
-# Edit .env with your Slack tokens and configuration
+# Edit .env with your Slack tokens and configuration:
+# SLACK_BOT_TOKEN=xoxb-your-token
+# SLACK_SIGNING_SECRET=your-signing-secret
+# SLACK_ADMIN_CHANNEL=leave-requests
 ```
 
 4. Run the development server:
 ```bash
-python src/app.py
+python -m flask --app src.app run --debug
 ```
+
+5. Set up your Slack App:
+   - Create a new Slack App at https://api.slack.com/apps
+   - Add the following Slash Command:
+     - Command: `/timeoff`
+     - Request URL: `https://your-domain/slack/commands`
+   - Enable Interactivity:
+     - Request URL: `https://your-domain/slack/interactivity`
+   - Add Bot Token Scopes:
+     - `chat:write`
+     - `commands`
+     - `users:read`
+   - Install the app to your workspace
 
 ## Deployment
 
@@ -63,6 +87,16 @@ The system includes deployment scripts for Vultr hosting:
 - HTTPS-only communication
 - Environment-based configuration
 - Secure credential storage
+- Request timestamp validation
+- Signature verification for all Slack requests
+
+## Development
+
+- Written in Python with type hints
+- Follows PEP8 guidelines
+- Comprehensive test suite with pytest
+- Error handling and logging
+- Modular design with separation of concerns
 
 ## License
 

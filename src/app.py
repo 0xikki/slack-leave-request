@@ -1,3 +1,7 @@
+"""
+Flask application for handling Slack interactions.
+"""
+
 import os
 import json
 import hmac
@@ -12,11 +16,24 @@ from slack_sdk.signature import SignatureVerifier
 from functools import wraps
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
-from slack.slack_commands import SlackCommandsHandler
-from slack.slack_actions import SlackActionsHandler
+from src.slack.slack_commands import SlackCommandsHandler
+from src.slack.slack_actions import SlackActionsHandler
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)  # Force override any existing env vars
+
+# Debug environment variables
+logger.debug("Environment variables at startup:")
+logger.debug(f"Current working directory: {os.getcwd()}")
+logger.debug(f".env file location: {os.path.abspath('.env')}")
+logger.debug(f"SLACK_ADMIN_USER_IDS raw: {os.getenv('SLACK_ADMIN_USER_IDS', 'Not set')}")
+logger.debug(f"SLACK_ADMIN_USER_IDS type: {type(os.getenv('SLACK_ADMIN_USER_IDS', 'Not set'))}")
+logger.debug(f"SLACK_BOT_TOKEN: {'Set' if os.getenv('SLACK_BOT_TOKEN') else 'Not set'}")
+logger.debug(f"SLACK_SIGNING_SECRET: {'Set' if os.getenv('SLACK_SIGNING_SECRET') else 'Not set'}")
 
 # Configure logging
 dictConfig({
@@ -42,27 +59,26 @@ dictConfig({
 # Initialize Flask app
 app = Flask(__name__)
 
-# Initialize Slack client
-slack_token = os.getenv("SLACK_BOT_TOKEN")
-if not slack_token:
-    raise ValueError("SLACK_BOT_TOKEN environment variable is not set")
-
-slack_client = WebClient(token=slack_token)
-actions_handler = SlackActionsHandler(slack_client)
-commands_handler = SlackCommandsHandler(slack_client)
+# Initialize Slack client and handlers
+slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
+slack_commands = SlackCommandsHandler(slack_client)
+slack_actions = SlackActionsHandler(slack_client)
+signature_verifier = SignatureVerifier(os.environ.get("SLACK_SIGNING_SECRET", "test_signing_secret"))
 
 def verify_slack_request(f):
-    """Decorator to verify that the request is coming from Slack."""
+    """Decorator to verify Slack requests."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         timestamp = request.headers.get('X-Slack-Request-Timestamp')
         signature = request.headers.get('X-Slack-Signature')
 
         if not timestamp or not signature:
+            app.logger.warning("Invalid request signature")
             return jsonify({"ok": False, "error": "Invalid request signature"}), 401
 
         # Check if the timestamp is too old
         if abs(time.time() - int(timestamp)) > 60 * 5:
+            app.logger.warning("Request too old")
             return jsonify({"ok": False, "error": "Request too old"}), 401
 
         # Get request body as string
@@ -80,6 +96,7 @@ def verify_slack_request(f):
 
         # Compare signatures using constant time comparison
         if not hmac.compare_digest(calculated_signature, signature):
+            app.logger.warning("Invalid request signature")
             return jsonify({"ok": False, "error": "Invalid request signature"}), 401
 
         return f(*args, **kwargs)
@@ -119,49 +136,69 @@ def verify_slack_requests():
             app.logger.warning("Invalid request signature")
             return jsonify({"ok": False, "error": "Invalid request signature"}), 401
 
-@app.route('/slack/commands', methods=['POST'])
-def slack_commands():
+@app.route("/slack/commands", methods=["POST"])
+@verify_slack_request
+def handle_command():
     """Handle Slack slash commands."""
     try:
-        return commands_handler.handle_command(request.form)
+        response = slack_commands.handle_command(request.form)
+        return jsonify(response), 200
     except Exception as e:
-        app.logger.error(f"Error handling command: {str(e)}")
-        return jsonify({"error": "Internal server error"}), 500
+        logger.error(f"Error handling command: {e}")
+        return jsonify({
+            "ok": False,
+            "error": str(e),
+            "response_type": "ephemeral",
+            "text": "An error occurred"
+        }), 200
 
-@app.route('/slack/interactivity', methods=['POST'])
-def slack_interactivity():
+@app.route("/slack/interactivity", methods=["POST"])
+def handle_interaction():
     """Handle Slack interactive components."""
     try:
-        form_data = dict(request.form)
-        payload = json.loads(form_data['payload'])
-        
-        if payload['type'] == 'view_submission':
-            response = actions_handler.handle_action(payload)
-            return jsonify(response)
-            
-        return jsonify({"ok": False, "error": "Unsupported interaction type"}), 400
-        
-    except (KeyError, json.JSONDecodeError) as e:
-        app.logger.error(f"Error processing interactive payload: {str(e)}")
-        return jsonify({"ok": False, "error": "Invalid payload"}), 400
-    except Exception as e:
-        app.logger.error(f"Unexpected error: {str(e)}")
-        return jsonify({"ok": False, "error": "Internal server error"}), 500
+        # Verify request signature
+        if not verify_slack_request(request):
+            logger.error("Invalid request signature")
+            return jsonify({"error": "Invalid request"}), 401
 
-@app.route("/slack/actions", methods=["POST"])
-@verify_slack_request
-def handle_actions():
-    """Handle Slack interactive actions (button clicks and modal submissions)."""
-    try:
-        # Parse the request payload
+        # Parse payload
         payload = json.loads(request.form["payload"])
-        return actions_handler.handle_action(payload)
-        
+        interaction_type = payload.get("type")
+
+        if interaction_type == "view_submission":
+            # Handle modal submission
+            try:
+                response = slack_actions.handle_view_submission(payload)
+                if not response:
+                    # For successful submissions, return an empty object
+                    return jsonify({}), 200
+                if response.get("response_action") == "errors":
+                    # For validation errors, return the errors
+                    return jsonify(response), 200
+                # For any other response, return empty object
+                return jsonify({}), 200
+            except Exception as e:
+                logger.error(f"Error in view submission: {str(e)}")
+                # On error, return empty object to close modal
+                return jsonify({}), 200
+
+        elif interaction_type == "block_actions":
+            # Handle button clicks and other block actions
+            response = slack_actions.handle_action(payload)
+            if response.get("response_action") == "clear":
+                return jsonify({}), 200
+            return jsonify(response), 200
+
+        # For any other interaction type, return empty object
+        return jsonify({}), 200
+
     except Exception as e:
-        app.logger.error(f"Error handling action: {str(e)}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        logger.error(f"Error handling interaction: {str(e)}")
+        # On error, return empty object
+        return jsonify({}), 200
 
 @app.route("/slack/events", methods=["POST"])
+@verify_slack_request
 def slack_events():
     """Handle Slack events and interactions"""
     data = request.json
@@ -171,6 +208,11 @@ def slack_events():
         return jsonify({"challenge": data["challenge"]})
     
     return jsonify({"ok": True})
+
+@app.route("/slack/actions", methods=["POST"])
+def handle_actions():
+    """Handle Slack actions - mirrors the interactivity endpoint."""
+    return handle_interaction()
 
 if __name__ == '__main__':
     app.run(debug=os.getenv('FLASK_DEBUG', 'False').lower() == 'true') 

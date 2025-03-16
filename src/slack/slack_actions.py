@@ -1,113 +1,673 @@
+"""
+Handles Slack interactive actions for leave request approvals/denials.
+"""
+
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 import json
 import logging
+import os
+from typing import Dict, List, Any, Optional
+from src.config.organization import (
+    is_department_head,
+    get_department_head,
+    get_department_name,
+    HR_CHANNEL_ID,
+    ADMIN_USERS,
+    load_admin_users
+)
+import re
+from src.slack.helpers import create_admin_notification_blocks, create_user_notification_blocks, create_denial_modal_view
 
 logger = logging.getLogger(__name__)
 
 class SlackActionsHandler:
-    def __init__(self, slack_client: WebClient):
-        self.client = slack_client
+    def __init__(self, client: WebClient):
+        self.client = client
+        self.logger = logging.getLogger(__name__)
 
-    def handle_action(self, payload_str):
-        """Handle incoming Slack interactive actions"""
+    def handle_action(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle Slack interactive actions."""
         try:
-            payload = json.loads(payload_str)
-            action_type = payload.get("type")
-            
-            if action_type == "view_submission":
-                return self._handle_view_submission(payload)
+            # Check payload type first
+            payload_type = payload.get("type")
+            logger.info(f"Handling action of type: {payload_type}")
+            logger.info(f"Full payload: {json.dumps(payload)}")
+
+            if payload_type == "view_submission":
+                # Handle view submissions
+                return self.handle_view_submission(payload)
+            elif payload_type == "block_actions":
+                # Handle button clicks
+                action = payload.get("actions", [{}])[0]
+                action_id = action.get("action_id")
+                user_id = payload.get("user", {}).get("id")
                 
-            return {"ok": True}
+                logger.info(f"Handling block action {action_id} from user {user_id}")
+
+                if not action_id or not user_id:
+                    logger.error("Missing action_id or user_id")
+                    return {"text": "Invalid action"}
+
+                # Get container info first
+                container = payload.get("container", {})
+                channel_id = container.get("channel_id")
+                message_ts = container.get("message_ts")
+
+                if not channel_id or not message_ts:
+                    logger.error(f"Missing container info: channel_id={channel_id}, message_ts={message_ts}")
+                    return {"text": "Could not process request"}
+
+                # Extract request details from message
+                message = payload.get("message", {})
+                if not message:
+                    logger.error("No message found in payload")
+                    return {"text": "Could not process request"}
+
+                # Add container info to message for _extract_request_details
+                message["container"] = container
+
+                request_details = self._extract_request_details(message)
+                if not request_details:
+                    logger.error("Could not extract request details from message")
+                    return {"text": "Could not process request"}
+
+                # Check authorization
+                requester_id = request_details.get("requester_id")
+                if user_id == requester_id:
+                    # Check if user is super admin
+                    admin_users = load_admin_users()
+                    logger.info(f"User {user_id} is trying to handle their own request. Admin users: {admin_users}")
+                    if user_id not in admin_users:
+                        logger.error(f"User {user_id} tried to handle their own request but is not an admin")
+                        return {"text": "You cannot approve or reject your own request unless you are a super admin"}
+
+                if not self._is_authorized(user_id, requester_id):
+                    logger.error(f"User {user_id} is not authorized to perform this action")
+                    return {"text": "You are not authorized to perform this action"}
+
+                # Handle different actions
+                try:
+                    if action_id == "approve_leave":
+                        logger.info(f"Processing approval from user {user_id}")
+                        # Process approval immediately
+                        self._handle_approval(payload, request_details)
+                        # Return empty response to acknowledge
+                        return {}
+
+                    elif action_id == "reject_leave":
+                        if not payload.get("trigger_id"):
+                            logger.error("Missing trigger_id for rejection modal")
+                            return {"text": "Could not open rejection dialog"}
+                        logger.info(f"Opening rejection modal for user {user_id}")
+                        self._handle_rejection(payload, request_details)
+                        return {}  # Empty response for success
+
+                except Exception as e:
+                    logger.error(f"Error handling action: {str(e)}", exc_info=True)
+                    return {"text": f"Error: {str(e)}"}
+
+                return {}  # Default empty response for unhandled action_id
+
+        except Exception as e:
+            logger.error(f"Error handling action: {str(e)}", exc_info=True)
+            return {"text": "An error occurred"}
+
+    def handle_view_submission(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle view submission."""
+        try:
+            view = payload.get("view", {})
+            callback_id = view.get("callback_id")
             
-        except json.JSONDecodeError:
-            logger.error("Failed to parse payload JSON")
-            return {"ok": False, "error": "Invalid payload format"}
+            if callback_id == "rejection_modal":
+                # Quick validation first
+                values = view.get("state", {}).get("values", {})
+                rejection_block = values.get("rejection_reason_block", {})
+                if not rejection_block.get("rejection_reason", {}).get("value"):
+                    return {
+                        "response_action": "errors",
+                        "errors": {
+                            "rejection_reason_block": "Please provide a reason for rejection"
+                        }
+                    }
+                
+                # Queue processing and return empty response immediately
+                self._queue_rejection_processing(payload)
+                return {}  # Empty response to close modal per Slack's requirements
+                
+            elif callback_id == "leave_request_modal":
+                # Extract form values for quick validation
+                values = view.get("state", {}).get("values", {})
+                
+                # Do quick validation first
+                errors = self._validate_leave_request(values)
+                if errors:
+                    return {
+                        "response_action": "errors",
+                        "errors": errors
+                    }
+                
+                # Queue processing and return empty response immediately
+                self._queue_leave_request_processing(payload)
+                return {}  # Empty response to close modal per Slack's requirements
+            
+            # For any other modal, just close it
+            return {}  # Empty response per Slack's requirements
             
         except Exception as e:
-            logger.error(f"Error handling action: {str(e)}")
-            return {"ok": False, "error": "Internal server error"}
+            logger.error(f"Error handling view submission: {str(e)}")
+            return {
+                "response_action": "errors",
+                "errors": {
+                    "submission": "An unexpected error occurred. Please try again."
+                }
+            }
 
-    def _handle_view_submission(self, payload):
-        """Handle form submission from modal"""
+    def _validate_leave_request(self, values: Dict[str, Any]) -> Optional[Dict[str, Dict[str, str]]]:
+        """Validate leave request form values."""
+        errors = {}
+        
+        # Validate leave type
+        leave_type_block = values.get("leave_type_block", {})
+        if not leave_type_block.get("leave_type", {}).get("selected_option", {}).get("value"):
+            errors["leave_type_block"] = "Please select a leave type"
+        
+        # Validate dates
+        date_block = values.get("date_block", {})
+        if not date_block.get("start_date", {}).get("selected_date"):
+            errors["date_block"] = "Please select a start date"
+        
+        # Validate coverage
+        coverage_block = values.get("coverage_block", {})
+        if not coverage_block.get("coverage_person", {}).get("selected_user"):
+            errors["coverage_block"] = "Please select who will cover for you"
+        
+        # Validate tasks
+        tasks_block = values.get("tasks_block", {})
+        if not tasks_block.get("tasks", {}).get("value"):
+            errors["tasks_block"] = "Please list tasks to be covered"
+        
+        # Validate reason
+        reason_block = values.get("reason_block", {})
+        if not reason_block.get("reason", {}).get("value"):
+            errors["reason_block"] = "Please provide a reason"
+        
+        return errors if errors else None
+
+    def _queue_leave_request_processing(self, payload: Dict[str, Any]) -> None:
+        """Queue leave request processing to be handled asynchronously."""
+        import threading
+        thread = threading.Thread(target=self._process_leave_request, args=(payload,))
+        thread.daemon = True
+        thread.start()
+
+    def _process_leave_request(self, payload: Dict[str, Any]) -> None:
+        """Process leave request in background."""
         try:
-            view = payload["view"]
-            if view["callback_id"] != "leave_request_modal":
-                return {"ok": False, "error": "Invalid modal callback"}
-                
+            view = payload.get("view", {})
+            user = payload.get("user", {})
+            values = view.get("state", {}).get("values", {})
+            
             # Extract form values
-            values = view["state"]["values"]
-            leave_type = values["leave_type"]["leave_type_select"]["selected_option"]["value"]
-            start_date = values["date_range"]["start_date"]["selected_date"]
-            end_date = values["end_date"]["end_date"]["selected_date"]
-            reason = values["reason"]["reason_text"]["value"]
-            user_id = payload["user"]["id"]
+            leave_type = values.get("leave_type_block", {}).get("leave_type", {}).get("selected_option", {}).get("value")
+            start_date = values.get("date_block", {}).get("start_date", {}).get("selected_date")
+            coverage_person = values.get("coverage_block", {}).get("coverage_person", {}).get("selected_user")
+            tasks = values.get("tasks_block", {}).get("tasks", {}).get("value")
+            reason = values.get("reason_block", {}).get("reason", {}).get("value")
             
-            # Send confirmation message
-            self.client.chat_postMessage(
-                channel=user_id,
-                text=f"Your leave request has been submitted:\nType: {leave_type}\nFrom: {start_date}\nTo: {end_date}\nReason: {reason}"
-            )
+            logger.info(f"Processing leave request for user {user.get('id')} of type {leave_type}")
             
-            # Notify approver (you can customize this part)
-            approver_channel = "leave-requests"  # Change this to your approval channel
-            self.client.chat_postMessage(
-                channel=approver_channel,
-                text=f"New leave request from <@{user_id}>:",
-                blocks=[
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": f"*New leave request from <@{user_id}>:*"
-                        }
-                    },
-                    {
-                        "type": "section",
-                        "fields": [
-                            {"type": "mrkdwn", "text": f"*Type:*\n{leave_type}"},
-                            {"type": "mrkdwn", "text": f"*Duration:*\n{start_date} to {end_date}"},
-                            {"type": "mrkdwn", "text": f"*Reason:*\n{reason}"}
-                        ]
-                    },
-                    {
-                        "type": "actions",
-                        "elements": [
-                            {
-                                "type": "button",
-                                "text": {"type": "plain_text", "text": "Approve"},
-                                "style": "primary",
-                                "value": json.dumps({
-                                    "user_id": user_id,
-                                    "leave_type": leave_type,
-                                    "start_date": start_date,
-                                    "end_date": end_date
-                                }),
-                                "action_id": "approve_leave"
+            # Create notification blocks with approval/rejection buttons
+            notification_blocks = [
+                {
+                    "type": "section",
+                    "fields": [
+                        {"type": "mrkdwn", "text": f"*Requester:*\n<@{user.get('id')}>"},
+                        {"type": "mrkdwn", "text": f"*Type:*\n{leave_type}"},
+                        {"type": "mrkdwn", "text": f"*Start Date:*\n{start_date}"},
+                        {"type": "mrkdwn", "text": f"*Coverage:*\n<@{coverage_person}>"}
+                    ]
+                },
+                {
+                    "type": "section",
+                    "fields": [
+                        {"type": "mrkdwn", "text": f"*Tasks to Cover:*\n{tasks}"},
+                        {"type": "mrkdwn", "text": f"*Reason:*\n{reason}"}
+                    ]
+                },
+                {
+                    "type": "divider"
+                },
+                {
+                    "type": "actions",
+                    "block_id": "leave_request_actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {
+                                "type": "plain_text",
+                                "text": "✅ Approve Request",
+                                "emoji": True
                             },
-                            {
-                                "type": "button",
-                                "text": {"type": "plain_text", "text": "Reject"},
-                                "style": "danger",
-                                "value": json.dumps({
-                                    "user_id": user_id,
-                                    "leave_type": leave_type,
-                                    "start_date": start_date,
-                                    "end_date": end_date
-                                }),
-                                "action_id": "reject_leave"
+                            "style": "primary",
+                            "value": json.dumps({
+                                "request_id": f"{user.get('id')}_{start_date}_{leave_type}",
+                                "action": "approve"
+                            }),
+                            "action_id": "approve_leave",
+                            "confirm": {
+                                "title": {
+                                    "type": "plain_text",
+                                    "text": "Approve Leave Request"
+                                },
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f"Are you sure you want to approve this {leave_type} request from <@{user.get('id')}>?"
+                                },
+                                "confirm": {
+                                    "type": "plain_text",
+                                    "text": "Yes, Approve"
+                                },
+                                "deny": {
+                                    "type": "plain_text",
+                                    "text": "No, Cancel"
+                                },
+                                "style": "primary"
                             }
-                        ]
+                        },
+                        {
+                            "type": "button",
+                            "text": {
+                                "type": "plain_text",
+                                "text": "❌ Reject Request",
+                                "emoji": True
+                            },
+                            "style": "danger",
+                            "value": json.dumps({
+                                "request_id": f"{user.get('id')}_{start_date}_{leave_type}",
+                                "action": "reject"
+                            }),
+                            "action_id": "reject_leave",
+                            "confirm": {
+                                "title": {
+                                    "type": "plain_text",
+                                    "text": "Reject Leave Request"
+                                },
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f"Are you sure you want to reject this {leave_type} request from <@{user.get('id')}>?\nThis will open a dialog to provide a rejection reason."
+                                },
+                                "confirm": {
+                                    "type": "plain_text",
+                                    "text": "Yes, Reject"
+                                },
+                                "deny": {
+                                    "type": "plain_text",
+                                    "text": "No, Cancel"
+                                },
+                                "style": "danger"
+                            }
+                        }
+                    ]
+                }
+            ]
+            
+            # Send confirmation to user
+            user_blocks = notification_blocks[:-1]  # Remove action buttons for user notification
+            user_blocks.append({
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": ":information_source: Your request has been submitted and is pending approval."
                     }
                 ]
-            )
+            })
             
-            return {"ok": True}
+            try:
+                self.client.chat_postMessage(
+                    channel=user.get("id"),
+                    text=f"Your {leave_type} request has been submitted",
+                    blocks=user_blocks
+                )
+                logger.info(f"Sent confirmation to user {user.get('id')}")
+            except SlackApiError as e:
+                logger.error(f"Failed to send confirmation to user: {str(e)}")
+                raise
             
-        except KeyError as e:
-            logger.error(f"Missing required field: {str(e)}")
-            return {"ok": False, "error": "Missing required field"}
+            # Check if user is department head
+            user_id = user.get("id")
+            logger.info(f"Checking if user {user_id} is department head")
             
-        except SlackApiError as e:
-            logger.error(f"Slack API error: {e.response['error']}")
-            return {"ok": False, "error": "Failed to process leave request"} 
+            if is_department_head(user_id):
+                logger.info(f"User {user_id} is department head, sending to HR channel {HR_CHANNEL_ID}")
+                # If user is department head, send directly to HR
+                if HR_CHANNEL_ID:
+                    try:
+                        self.client.chat_postMessage(
+                            channel=HR_CHANNEL_ID,
+                            text=f"New {leave_type} request from Department Head <@{user_id}>",
+                            blocks=notification_blocks
+                        )
+                        logger.info(f"Successfully sent request to HR channel {HR_CHANNEL_ID}")
+                    except SlackApiError as e:
+                        logger.error(f"Failed to send to HR channel: {str(e)}")
+                        # Don't raise here - we've already confirmed to the user
+                else:
+                    logger.error("HR_CHANNEL_ID not configured")
+            else:
+                # Get department head for the user
+                dept_head = get_department_head(user_id)
+                if dept_head:
+                    logger.info(f"Sending request to department head {dept_head}")
+                    try:
+                        self.client.chat_postMessage(
+                            channel=dept_head,
+                            text=f"New {leave_type} request from <@{user_id}>",
+                            blocks=notification_blocks
+                        )
+                        logger.info(f"Successfully sent request to department head {dept_head}")
+                    except SlackApiError as e:
+                        logger.error(f"Failed to send to department head: {str(e)}")
+                        # Don't raise here - we've already confirmed to the user
+                else:
+                    logger.info(f"No department head found for user {user_id}, sending to HR")
+                    if HR_CHANNEL_ID:
+                        try:
+                            self.client.chat_postMessage(
+                                channel=HR_CHANNEL_ID,
+                                text=f"New {leave_type} request from <@{user_id}> (No department head found)",
+                                blocks=notification_blocks
+                            )
+                            logger.info(f"Successfully sent request to HR channel {HR_CHANNEL_ID}")
+                        except SlackApiError as e:
+                            logger.error(f"Failed to send to HR channel: {str(e)}")
+                            # Don't raise here - we've already confirmed to the user
+                    else:
+                        logger.error("HR_CHANNEL_ID not configured")
+                
+        except Exception as e:
+            logger.error(f"Error processing leave request: {str(e)}", exc_info=True)
+            # Try to notify user of error
+            try:
+                self.client.chat_postMessage(
+                    channel=user.get("id"),
+                    text="There was an error processing your leave request. Please contact HR or try again."
+                )
+            except:
+                logger.error("Failed to send error notification to user", exc_info=True)
+
+    def _queue_rejection_processing(self, payload: Dict[str, Any]) -> None:
+        """Queue rejection processing to be handled asynchronously."""
+        import threading
+        thread = threading.Thread(target=self._process_rejection, args=(payload,))
+        thread.daemon = True
+        thread.start()
+
+    def _process_rejection(self, payload: Dict[str, Any]) -> None:
+        """Process rejection in background."""
+        try:
+            view = payload.get("view", {})
+            values = view.get("state", {}).get("values", {})
+            metadata = json.loads(view.get("private_metadata", "{}"))
+            
+            rejection_reason = values.get("rejection_reason_block", {}).get("rejection_reason", {}).get("value")
+            channel_id = metadata.get("channel_id")
+            message_ts = metadata.get("message_ts")
+            requester_id = metadata.get("requester_id")
+            
+            if all([channel_id, message_ts, requester_id, rejection_reason]):
+                # Update original message
+                self.client.chat_update(
+                    channel=channel_id,
+                    ts=message_ts,
+                    text=f"Leave request from <@{requester_id}> was rejected",
+                    blocks=[
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f":x: Leave request from <@{requester_id}> was rejected\n*Reason:* {rejection_reason}"
+                            }
+                        }
+                    ]
+                )
+                
+                # Notify requester
+                self.client.chat_postMessage(
+                    channel=requester_id,
+                    text="Your leave request was rejected",
+                    blocks=[
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f":x: Your leave request was rejected\n*Reason:* {rejection_reason}"
+                            }
+                        }
+                    ]
+                )
+        except Exception as e:
+            logger.error(f"Error processing rejection: {str(e)}")
+
+    def _is_authorized(self, user_id: str, requester_id: str) -> bool:
+        """Check if user is authorized to approve/reject the request."""
+        # Admin users can approve/reject any request
+        if user_id in load_admin_users():
+            return True
+
+        # Department heads can approve/reject requests from their team members
+        if is_department_head(user_id):
+            return True
+
+        return False
+
+    def _extract_request_details(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Extract request details from message blocks."""
+        try:
+            logger.info(f"Extracting request details from message: {json.dumps(message)}")
+            
+            # Get channel ID from container or message
+            channel_id = message.get("channel_id")  # Try direct channel_id first
+            if not channel_id:
+                # Try container path from the payload
+                container = message.get("container", {})
+                channel_id = container.get("channel_id")
+                logger.info(f"Found channel_id from container: {channel_id}")
+            
+            if not channel_id:
+                logger.error("Could not find channel_id in message or container")
+                return None
+
+            # Get message timestamp
+            message_ts = message.get("ts")  # Try direct ts first
+            if not message_ts:
+                # Try container path
+                container = message.get("container", {})
+                message_ts = container.get("message_ts")
+                logger.info(f"Found message_ts from container: {message_ts}")
+
+            if not message_ts:
+                logger.error("Could not find message_ts in message or container")
+                return None
+
+            # Extract fields from blocks
+            blocks = message.get("blocks", [])
+            if not blocks:
+                logger.error("No blocks found in message")
+                return None
+
+            # First block should contain the requester and leave type
+            first_block = next((b for b in blocks if b.get("type") == "section" and b.get("fields")), None)
+            if not first_block:
+                logger.error("Could not find section block with fields")
+                return None
+
+            fields = first_block.get("fields", [])
+            logger.info(f"Found fields in first block: {json.dumps(fields)}")
+            
+            if len(fields) < 3:
+                logger.error(f"Not enough fields in block: {json.dumps(fields)}")
+                return None
+
+            # Extract requester ID from the first field
+            requester_text = fields[0].get("text", "")
+            requester_match = re.search(r"<@([^>]+)>", requester_text)
+            if not requester_match:
+                logger.error(f"Could not extract requester ID from text: {requester_text}")
+                return None
+            
+            requester_id = requester_match.group(1)
+            logger.info(f"Extracted requester_id: {requester_id}")
+
+            # Extract leave type from the second field
+            leave_type_text = fields[1].get("text", "")
+            leave_type = leave_type_text.split("\n")[-1] if "\n" in leave_type_text else ""
+            logger.info(f"Extracted leave_type: {leave_type}")
+
+            # Extract start date from the third field
+            start_date_text = fields[2].get("text", "")
+            start_date = start_date_text.split("\n")[-1] if "\n" in start_date_text else ""
+            logger.info(f"Extracted start_date: {start_date}")
+
+            details = {
+                "requester_id": requester_id,
+                "channel_id": channel_id,
+                "message_ts": message_ts,
+                "leave_type": leave_type,
+                "start_date": start_date
+            }
+            
+            logger.info(f"Successfully extracted request details: {json.dumps(details)}")
+            return details
+
+        except Exception as e:
+            logger.error(f"Error extracting request details: {str(e)}", exc_info=True)
+            return None
+
+    def _queue_approval_processing(self, payload: Dict[str, Any], request_details: Dict[str, Any]) -> None:
+        """Queue approval processing to be handled asynchronously."""
+        import threading
+        thread = threading.Thread(target=self._handle_approval, args=(payload, request_details))
+        thread.daemon = True
+        thread.start()
+
+    def _handle_approval(self, payload: Dict[str, Any], request_details: Dict[str, Any]) -> None:
+        """Handle leave request approval."""
+        try:
+            channel_id = request_details.get("channel_id")
+            message_ts = request_details.get("message_ts")
+            user_id = payload.get("user", {}).get("id")
+            requester_id = request_details.get("requester_id")
+            leave_type = request_details.get("leave_type")
+
+            logger.info(f"Starting approval process with details: channel_id={channel_id}, message_ts={message_ts}, user_id={user_id}, requester_id={requester_id}, leave_type={leave_type}")
+
+            if not all([channel_id, message_ts, user_id, requester_id]):
+                missing_fields = [field for field, value in {
+                    'channel_id': channel_id,
+                    'message_ts': message_ts,
+                    'user_id': user_id,
+                    'requester_id': requester_id
+                }.items() if not value]
+                raise ValueError(f"Missing required fields for approval: {', '.join(missing_fields)}")
+
+            # First, update the original message to remove buttons and show approval
+            try:
+                self.client.chat_update(
+                    channel=channel_id,
+                    ts=message_ts,
+                    text=f"Leave request from <@{requester_id}> was approved",
+                    blocks=[
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f":white_check_mark: Leave request from <@{requester_id}> was approved by <@{user_id}>"
+                            }
+                        },
+                        {
+                            "type": "section",
+                            "fields": [
+                                {"type": "mrkdwn", "text": f"*Type:*\n{leave_type}"},
+                                {"type": "mrkdwn", "text": f"*Start Date:*\n{request_details.get('start_date')}"}
+                            ]
+                        }
+                    ]
+                )
+                logger.info("Successfully updated original message")
+            except SlackApiError as e:
+                logger.error(f"Failed to update original message: {str(e.response)}")
+                raise
+
+            # Then, send a confirmation to the requester
+            try:
+                self.client.chat_postMessage(
+                    channel=requester_id,
+                    text=f"Your {leave_type} request was approved by <@{user_id}>",
+                    blocks=[
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f":white_check_mark: Your {leave_type} request was approved by <@{user_id}>"
+                            }
+                        },
+                        {
+                            "type": "section",
+                            "fields": [
+                                {"type": "mrkdwn", "text": f"*Type:*\n{leave_type}"},
+                                {"type": "mrkdwn", "text": f"*Start Date:*\n{request_details.get('start_date')}"}
+                            ]
+                        }
+                    ]
+                )
+                logger.info(f"Successfully sent approval notification to user {requester_id}")
+            except SlackApiError as e:
+                logger.error(f"Failed to send notification to requester: {str(e.response)}")
+                # Don't raise here - we've already updated the original message
+
+            # If we have a response_url, acknowledge the action
+            response_url = payload.get("response_url")
+            if response_url:
+                try:
+                    import requests
+                    requests.post(
+                        response_url,
+                        json={
+                            "text": "Request approved successfully",
+                            "response_type": "ephemeral",
+                            "replace_original": False
+                        }
+                    )
+                    logger.info("Successfully sent response_url acknowledgment")
+                except Exception as e:
+                    logger.error(f"Failed to acknowledge confirmation: {str(e)}")
+
+        except Exception as e:
+            error_msg = f"Error processing approval: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            try:
+                self.client.chat_postMessage(
+                    channel=requester_id,
+                    text=error_msg
+                )
+            except:
+                logger.error("Failed to send error notification to user", exc_info=True)
+
+    def _handle_rejection(self, payload: Dict[str, Any], request_details: Dict[str, Any]) -> None:
+        """Handle leave request rejection."""
+        trigger_id = payload.get("trigger_id")
+        if not trigger_id:
+            raise ValueError("Missing trigger_id")
+
+        # Open rejection reason modal
+        self.client.views_open(
+            trigger_id=trigger_id,
+            view=create_denial_modal_view({
+                "user": {"id": request_details.get("requester_id")},
+                "leave_type": request_details.get("leave_type", "Unknown"),
+                "start_date": request_details.get("start_date", ""),
+                "end_date": request_details.get("end_date", "")
+            })
+        )

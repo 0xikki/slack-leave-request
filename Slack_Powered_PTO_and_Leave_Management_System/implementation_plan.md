@@ -6,7 +6,7 @@
 2.  Install the required Python version (use the default system Python, as no explicit version is given) and set up a virtual environment. (Project Requirements: Tech Stack - Backend)
 3.  Create a configuration file at `/config/config.json` to store Slack tokens, signing secret, admin Slack user IDs, and admin channel ID. (Project Requirements: Admin Approval Workflow)
 4.  Set environment variables for `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, and any other secrets. (Project Requirements: Admin Approval Workflow)
-5.  Register a new Slack App via the Slack API dashboard and configure the slash command `/leave` with the request URL pointing to your development endpoint (e.g., using ngrok for local testing). (Project Requirements: Slash Command, Frontend/Integration)
+5.  Register a new Slack App via the Slack API dashboard and configure the slash command `/timeoff` with the request URL pointing to your development endpoint (e.g., using ngrok for local testing). (Project Requirements: Slash Command, Frontend/Integration)
 6.  **Validation**: Verify the Slack App settings in the dashboard to ensure the slash command configuration is correct.
 
 ## Phase 2: Slack UI (Frontend/Integration) Development
@@ -57,7 +57,7 @@
 ## Phase 4: Integration
 
 1.  Connect the backend endpoints with the Slack App configuration by updating the Request URL for slash commands and interactivity in the Slack dashboard to point to your ngrok URL or deployed endpoint. (Project Requirements: Integration)
-2.  In the `/app.py` file, integrate the logic so that upon receiving a `/leave` command, the modal defined in `/templates/leave_modal.json` is correctly opened for the user. (Project Requirements: Slash Command)
+2.  In the `/app.py` file, integrate the logic so that upon receiving a `/timeoff` command, the modal defined in `/templates/leave_modal.json` is correctly opened for the user. (Project Requirements: Slash Command)
 3.  Link the submit callback from the modal to post a message into the admin review Slack channel, ensuring all required fields are included. (Project Requirements: Admin Approval Workflow)
 4.  Integrate the admin button responses to trigger either an immediate approval notification or to open a denial reason modal. (Project Requirements: Admin Approval Workflow)
 5.  Craft the Slack notification messages to include appropriate instructions and confirmations for both the requester and the admin (clearly indicating that modifications/cancellations aren’t allowed and that a new request is required for changes). (Project Requirements: Notifications)
@@ -72,7 +72,7 @@
 5.  Configure environment variables on the server (e.g., in a `.env` file or the server’s environment) for `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, and any other required keys. (Project Requirements: Admin Approval Workflow)
 6.  Update the Slack App configuration in the Slack dashboard with the Vultr instance’s public URL for slash commands and interactivity endpoints. (Project Requirements: Integration)
 7.  Set Firewall and security rules on Vultr to accept only necessary traffic (e.g., from Slack IP ranges). (Project Requirements: Security/Error Handling)
-8.  **Validation**: Perform end-to-end tests in the production environment by issuing the `/leave` command in Slack and following through all admin actions to verify functionality.
+8.  **Validation**: Perform end-to-end tests in the production environment by issuing the `/timeoff` command in Slack and following through all admin actions to verify functionality.
 
 ## Final Validation and Testing
 

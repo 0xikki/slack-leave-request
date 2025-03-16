@@ -85,7 +85,7 @@ def create_admin_notification_blocks(leave_request: Dict[str, Any]) -> List[Dict
                     },
                     "style": "primary",
                     "value": "approve",
-                    "action_id": "approve_leave"
+                    "action_id": "approve_leave_hr"
                 },
                 {
                     "type": "button",
@@ -96,7 +96,7 @@ def create_admin_notification_blocks(leave_request: Dict[str, Any]) -> List[Dict
                     },
                     "style": "danger",
                     "value": "deny",
-                    "action_id": "deny_leave"
+                    "action_id": "reject_leave_hr"
                 }
             ]
         }

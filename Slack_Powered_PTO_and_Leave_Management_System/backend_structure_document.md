@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This document explains how the backend of our time-off and PTO management system is set up. The backend handles everything that isn’t directly seen in the Slack interface but is essential to making sure that leave requests work as expected. When a user enters the `/leave` command in Slack, a modal is triggered, and all the logic from validations to notifications is handled by the backend. This setup is designed to be straightforward so that users and team members can understand how the system works, even if they aren’t technical experts.
+This document explains how the backend of our time-off and PTO management system is set up. The backend handles everything that isn’t directly seen in the Slack interface but is essential to making sure that leave requests work as expected. When a user enters the `/timeoff` command in Slack, a modal is triggered, and all the logic from validations to notifications is handled by the backend. This setup is designed to be straightforward so that users and team members can understand how the system works, even if they aren’t technical experts.
 
 ## Backend Architecture
 
@@ -14,7 +14,7 @@ In this first version of the system, there is no persistent data store since wor
 
 ## API Design and Endpoints
 
-The backend uses a RESTful approach to interact with Slack’s API. Specific endpoints are set up to handle the incoming requests from the `/leave` slash command and to process the form data from the modal. There are also endpoints for sending notifications back to users and for handling admin approval workflows. These endpoints are designed to be simple and intuitive, ensuring smooth communication between Slack and the backend service. Each endpoint carries out its function in a clear way, reducing the complexity of the code and ensuring that all parts of the system work together seamlessly.
+The backend uses a RESTful approach to interact with Slack’s API. Specific endpoints are set up to handle the incoming requests from the `/timeoff` slash command and to process the form data from the modal. There are also endpoints for sending notifications back to users and for handling admin approval workflows. These endpoints are designed to be simple and intuitive, ensuring smooth communication between Slack and the backend service. Each endpoint carries out its function in a clear way, reducing the complexity of the code and ensuring that all parts of the system work together seamlessly.
 
 ## Hosting Solutions
 

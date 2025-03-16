@@ -2,11 +2,40 @@
 
 ## Introduction
 
-This document explains how the backend of our time-off and PTO management system is set up. The backend handles everything that isn’t directly seen in the Slack interface but is essential to making sure that leave requests work as expected. When a user enters the `/leave` command in Slack, a modal is triggered, and all the logic from validations to notifications is handled by the backend. This setup is designed to be straightforward so that users and team members can understand how the system works, even if they aren’t technical experts.
+This document explains how the backend of our time-off and PTO management system is set up. The backend handles everything that isn't directly seen in the Slack interface but is essential to making sure that leave requests work as expected. When a user enters the `/leave` command in Slack, a modal is triggered, and all the logic from validations to notifications is handled by the backend. This setup is designed to be straightforward so that users and team members can understand how the system works, even if they aren't technical experts.
 
 ## Backend Architecture
 
-The backend is built using Python and follows a modular design that separates different functionalities into clear components. The command handling, modal processing, and approval workflows are each managed by independent sections of the application. This approach makes it easier to update, debug, and extend the system. The design focuses on maintainability and performance by minimizing dependencies and using simple, well-documented code. This ensures that as the system grows, it remains reliable and quick to respond to requests.
+The backend is built using Python and follows a modular design that separates different functionalities into clear components. The current structure is:
+
+```
+src/
+├── __init__.py
+├── app.py                    # Main application entry point (65% coverage)
+├── config/
+│   └── organization.py       # Organization structure and configs (90% coverage)
+└── slack/
+    ├── __init__.py
+    ├── helpers.py           # Shared helper functions (100% coverage)
+    ├── slack_actions.py     # Action handlers (82% coverage)
+    ├── slack_commands.py    # Command handlers (67% coverage)
+    └── slack_helpers.py     # Additional helper functions (needs coverage)
+```
+
+The command handling, modal processing, and approval workflows are each managed by independent sections of the application. This approach makes it easier to update, debug, and extend the system. The design focuses on maintainability and performance by minimizing dependencies and using simple, well-documented code. This ensures that as the system grows, it remains reliable and quick to respond to requests.
+
+## Testing and Quality Assurance
+
+The system maintains a comprehensive test suite with:
+- 37 unit tests covering core functionality
+- Overall code coverage of 72%
+- Key modules like helpers.py achieving 100% coverage
+- Continuous testing during development
+
+Areas identified for improvement:
+- Increase coverage for slack_commands.py (currently 67%)
+- Add tests for slack_helpers.py
+- Enhance app.py coverage (currently 65%)
 
 ## Database Management
 
@@ -14,7 +43,7 @@ In this first version of the system, there is no persistent data store since wor
 
 ## API Design and Endpoints
 
-The backend uses a RESTful approach to interact with Slack’s API. Specific endpoints are set up to handle the incoming requests from the `/leave` slash command and to process the form data from the modal. There are also endpoints for sending notifications back to users and for handling admin approval workflows. These endpoints are designed to be simple and intuitive, ensuring smooth communication between Slack and the backend service. Each endpoint carries out its function in a clear way, reducing the complexity of the code and ensuring that all parts of the system work together seamlessly.
+The backend uses a RESTful approach to interact with Slack's API. Specific endpoints are set up to handle the incoming requests from the `/leave` slash command and to process the form data from the modal. There are also endpoints for sending notifications back to users and for handling admin approval workflows. These endpoints are designed to be simple and intuitive, ensuring smooth communication between Slack and the backend service. Each endpoint carries out its function in a clear way, reducing the complexity of the code and ensuring that all parts of the system work together seamlessly.
 
 ## Hosting Solutions
 
@@ -26,12 +55,39 @@ Several infrastructure components work behind the scenes to provide a smooth use
 
 ## Security Measures
 
-Security is a priority in this backend setup, particularly because it involves sensitive information like leave request details. The system uses practical approaches to protect user data and maintain integrity. Authentication and authorization are handled by verifying Slack user identities and checking membership in specific channels or approved lists of user IDs. Data is transmitted securely using encryption methods to prevent unauthorized access. These measures are designed to ensure that every part of the application complies with relevant regulations and protects the privacy of the users.
+Security is a priority in this backend setup, particularly because it involves sensitive information like leave request details. The system uses practical approaches to protect user data and maintain integrity:
+
+1. Authentication and Authorization:
+   - Proper verification of Slack request signatures
+   - Role-based access control (department heads, HR admins)
+   - Strict validation of user permissions for approvals
+
+2. Data Protection:
+   - Secure transmission using HTTPS
+   - Environment-based configuration
+   - No persistent storage of sensitive data
+
+These measures ensure compliance with relevant regulations and protect user privacy.
 
 ## Monitoring and Maintenance
 
-To keep the system running smoothly, a set of monitoring tools are in place. These tools track performance aspects like load times, error rates, and overall system health. Alerts notify the team if any critical issues are detected, ensuring that maintenance can be performed promptly. Regular updates and code reviews are part of the ongoing maintenance strategy, with the goal of keeping the backend up-to-date with the latest security patches and performance improvements. This proactive approach to monitoring and maintenance helps prevent downtime and ensures that the backend continues to work reliably.
+To keep the system running smoothly, we have implemented:
+
+1. Testing Infrastructure:
+   - Comprehensive test suite with 37 unit tests
+   - Regular coverage reporting
+   - Automated test runs during development
+
+2. Logging and Monitoring:
+   - JSON-formatted logging
+   - Error tracking and reporting
+   - Performance monitoring
+
+3. Maintenance Procedures:
+   - Regular code reviews
+   - Continuous test coverage improvement
+   - Documentation updates
 
 ## Conclusion and Overall Backend Summary
 
-In summary, the backend of our time-off and PTO system is carefully designed to work reliably with Slack and deliver a seamless experience for users. The architecture is modular and scalable, ensuring that the system can grow as needed without sacrificing performance. Through the use of a RESTful API design, secure communication, and thoughtful infrastructure choices like Vultr hosting and load balancers, the backend stands as a robust foundation for handling leave requests within Slack. The absence of a persistent database in this phase is a deliberate choice, keeping the system agile until further data management needs arise. Overall, the backend setup is both practical for current requirements and adaptable for future expansion.
+In summary, the backend of our time-off and PTO system is carefully designed to work reliably with Slack and deliver a seamless experience for users. The architecture is modular and well-tested, with key components achieving high test coverage. Through the use of a RESTful API design, secure communication, and thoughtful infrastructure choices like Vultr hosting and load balancers, the backend stands as a robust foundation for handling leave requests within Slack. The absence of a persistent database in this phase is a deliberate choice, keeping the system agile until further data management needs arise. Overall, the backend setup is both practical for current requirements and adaptable for future expansion.
