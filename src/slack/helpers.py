@@ -1,5 +1,9 @@
 from datetime import datetime
 from typing import Dict, Any, Union, List
+import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 def format_date_for_display(date: Union[str, datetime]) -> str:
     """Format a date for display in messages and modals."""
@@ -156,8 +160,32 @@ def create_user_notification_blocks(request_details: Dict[str, Any]) -> List[Dic
 
 def create_denial_modal_view(leave_request: Dict[str, Any]) -> Dict[str, Any]:
     """Create a modal view for collecting denial reason."""
-    return {
+    # Create metadata for the modal
+    metadata = {
+        "requester_id": leave_request["user"]["id"],
+        "channel_id": leave_request["channel_id"],
+        "message_ts": leave_request["message_ts"],
+        "leave_type": leave_request["leave_type"],
+        "start_date": leave_request["start_date"],
+        "end_date": leave_request.get("end_date", leave_request["start_date"])
+    }
+    
+    # Format dates for display
+    try:
+        start_date_display = format_date_for_display(metadata["start_date"]) if metadata["start_date"] else "Not specified"
+        end_date_display = format_date_for_display(metadata["end_date"]) if metadata["end_date"] else start_date_display
+    except ValueError:
+        # If date formatting fails, use the raw dates
+        start_date_display = metadata["start_date"]
+        end_date_display = metadata["end_date"]
+    
+    # Clean up leave type display (remove any escape characters)
+    leave_type_display = metadata["leave_type"].replace("\\", "")
+    
+    modal = {
         "type": "modal",
+        "callback_id": "denial_modal",
+        "private_metadata": json.dumps(metadata),
         "title": {
             "type": "plain_text",
             "text": "Deny Leave Request",
@@ -178,7 +206,7 @@ def create_denial_modal_view(leave_request: Dict[str, Any]) -> Dict[str, Any]:
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"You are about to deny the leave request from <@{leave_request['user']['id']}>"
+                    "text": f"You are about to deny the leave request from <@{metadata['requester_id']}>"
                 }
             },
             {
@@ -186,7 +214,7 @@ def create_denial_modal_view(leave_request: Dict[str, Any]) -> Dict[str, Any]:
                 "fields": [
                     {
                         "type": "mrkdwn",
-                        "text": f"*Type:*\n{leave_request['leave_type']}"
+                        "text": f"*Type:*\n{leave_type_display}"
                     }
                 ]
             },
@@ -195,31 +223,35 @@ def create_denial_modal_view(leave_request: Dict[str, Any]) -> Dict[str, Any]:
                 "fields": [
                     {
                         "type": "mrkdwn",
-                        "text": f"*Start Date:*\n{format_date_for_display(leave_request['start_date'])}"
+                        "text": f"*Start Date:*\n{start_date_display}"
                     },
                     {
                         "type": "mrkdwn",
-                        "text": f"*End Date:*\n{format_date_for_display(leave_request['end_date'])}"
+                        "text": f"*End Date:*\n{end_date_display}"
                     }
                 ]
             },
             {
                 "type": "input",
                 "block_id": "denial_reason",
-                "label": {
-                    "type": "plain_text",
-                    "text": "Reason for Denial",
-                    "emoji": True
-                },
                 "element": {
                     "type": "plain_text_input",
                     "action_id": "denial_reason_input",
                     "multiline": True,
                     "placeholder": {
                         "type": "plain_text",
-                        "text": "Please provide a reason for denying this leave request..."
+                        "text": "Please provide a reason for denying this leave request...",
+                        "emoji": True
                     }
+                },
+                "label": {
+                    "type": "plain_text",
+                    "text": "Reason for Denial",
+                    "emoji": True
                 }
             }
         ]
-    } 
+    }
+    
+    logger.info(f"Created modal view with callback_id: {modal.get('callback_id')} and private_metadata: {modal.get('private_metadata', 'NOT SET')}")
+    return modal 

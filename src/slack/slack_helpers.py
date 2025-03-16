@@ -4,6 +4,7 @@ Helper functions for creating Slack message blocks and views.
 from typing import Dict, Any, List
 from datetime import datetime
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -104,15 +105,29 @@ def create_user_notification_blocks(user_id: str, leave_type: str, start_date: s
         }
     ]
 
-def create_denial_modal_view(requester_id: str) -> Dict[str, Any]:
-    """Create a modal view for leave request rejection."""
-    return {
+def create_denial_modal_view(leave_request: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a modal view for collecting denial reason."""
+    # Create metadata with all necessary information
+    metadata = {
+        "requester_id": leave_request['user']['id'],
+        "channel_id": leave_request.get('channel_id'),
+        "message_ts": leave_request.get('message_ts'),
+        "leave_type": leave_request.get('leave_type'),
+        "start_date": leave_request.get('start_date'),
+        "end_date": leave_request.get('end_date', leave_request.get('start_date'))  # Default to start_date if no end_date
+    }
+    
+    # Format dates for display
+    start_date_display = format_date_for_display(metadata['start_date']) if metadata['start_date'] else 'Not specified'
+    end_date_display = format_date_for_display(metadata['end_date']) if metadata['end_date'] else start_date_display
+    
+    # Create the basic modal structure first
+    modal = {
         "type": "modal",
-        "callback_id": "rejection_modal",
-        "private_metadata": f'{{"requester_id": "{requester_id}"}}',
+        "callback_id": "denial_modal",
         "title": {
             "type": "plain_text",
-            "text": "Reject Leave Request",
+            "text": "Deny Leave Request",
             "emoji": True
         },
         "submit": {
@@ -124,45 +139,66 @@ def create_denial_modal_view(requester_id: str) -> Dict[str, Any]:
             "type": "plain_text",
             "text": "Cancel",
             "emoji": True
-        },
-        "blocks": [
-            {
-                "type": "header",
-                "text": {
-                    "type": "plain_text",
-                    "text": ":x: Reject Leave Request",
-                    "emoji": True
-                }
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": "*Please provide a reason for rejecting this leave request:*"
-                }
-            },
-            {
-                "type": "input",
-                "block_id": "rejection_reason_block",
-                "element": {
-                    "type": "plain_text_input",
-                    "action_id": "rejection_reason",
-                    "multiline": True,
-                    "min_length": 10,
-                    "placeholder": {
-                        "type": "plain_text",
-                        "text": "Enter reason for rejection",
-                        "emoji": True
-                    }
-                },
-                "label": {
-                    "type": "plain_text",
-                    "text": "Rejection Reason",
-                    "emoji": True
-                }
-            }
-        ]
+        }
     }
+    
+    # Add metadata
+    modal["private_metadata"] = json.dumps(metadata)
+    
+    # Add blocks
+    modal["blocks"] = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"You are about to deny the leave request from <@{metadata['requester_id']}>"
+            }
+        },
+        {
+            "type": "section",
+            "fields": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Type:*\n{metadata['leave_type']}"
+                }
+            ]
+        },
+        {
+            "type": "section",
+            "fields": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Start Date:*\n{start_date_display}"
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": f"*End Date:*\n{end_date_display}"
+                }
+            ]
+        },
+        {
+            "type": "input",
+            "block_id": "denial_reason",
+            "element": {
+                "type": "plain_text_input",
+                "action_id": "denial_reason_input",
+                "multiline": True,
+                "placeholder": {
+                    "type": "plain_text",
+                    "text": "Please provide a reason for denying this leave request...",
+                    "emoji": True
+                }
+            },
+            "label": {
+                "type": "plain_text",
+                "text": "Reason for Denial",
+                "emoji": True
+            }
+        }
+    ]
+    
+    logger.info(f"Created modal view with callback_id: {modal.get('callback_id')} and private_metadata: {modal.get('private_metadata', 'NOT SET')}")
+    return modal
 
 def format_date_for_display(date_str: str) -> str:
     """Format a date string for display in Slack messages."""

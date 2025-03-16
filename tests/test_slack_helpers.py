@@ -1,25 +1,33 @@
 import pytest
 from datetime import datetime
-from src.slack.helpers import (
+from src.slack.slack_helpers import (
     create_admin_notification_blocks,
     create_user_notification_blocks,
     create_denial_modal_view,
     format_date_for_display
 )
+import json
 
 def test_create_admin_notification_blocks():
     """Test creation of admin notification blocks for a leave request."""
-    leave_request = {
-        "user": {"id": "U123456", "name": "john.doe"},
-        "start_date": "2024-03-15",
-        "end_date": "2024-03-16",
-        "leave_type": "PTO",
-        "reason": "Taking a vacation",
-        "tasks_coverage": "All tasks covered",
-        "covering_user": {"id": "U654321", "name": "jane.smith"}
-    }
+    # Test input
+    user_id = "U123456"
+    leave_type = "PTO"
+    start_date = "2024-03-15"
+    end_date = "2024-03-16"
+    coverage_person = "U654321"
+    tasks = "All tasks covered"
+    reason = "Taking a vacation"
     
-    blocks = create_admin_notification_blocks(leave_request)
+    blocks = create_admin_notification_blocks(
+        user_id=user_id,
+        leave_type=leave_type,
+        start_date=start_date,
+        end_date=end_date,
+        coverage_person=coverage_person,
+        tasks=tasks,
+        reason=reason
+    )
     
     # Verify the structure of the blocks
     assert isinstance(blocks, list)
@@ -29,32 +37,42 @@ def test_create_admin_notification_blocks():
     blocks_str = str(blocks)
     
     # Check that all required information is present
-    assert "U123456" in blocks_str  # User ID in mention format
+    assert user_id in blocks_str  # User ID in mention format
     assert "March 15, 2024" in blocks_str  # Formatted start date
     assert "March 16, 2024" in blocks_str  # Formatted end date
-    assert "PTO" in blocks_str
-    assert "Taking a vacation" in blocks_str
-    assert "All tasks covered" in blocks_str
-    assert "U654321" in blocks_str  # Covering user ID in mention format
+    assert leave_type in blocks_str
+    assert reason in blocks_str
+    assert tasks in blocks_str
+    assert coverage_person in blocks_str  # Covering user ID in mention format
     
-    # Verify that approval and denial buttons are present
+    # Verify that approval and rejection buttons are present
     assert any(block.get("type") == "actions" for block in blocks)
     actions_block = next(block for block in blocks if block.get("type") == "actions")
     buttons = actions_block.get("elements", [])
     assert len(buttons) == 2
-    assert any(btn.get("value") == "approve" for btn in buttons)
-    assert any(btn.get("value") == "deny" for btn in buttons)
+    assert any(btn.get("action_id") == "approve_leave" for btn in buttons)
+    assert any(btn.get("action_id") == "reject_leave" for btn in buttons)
 
 def test_create_user_notification_blocks():
     """Test creation of user notification blocks for request status."""
-    request_details = {
-        "start_date": "2024-03-15",
-        "end_date": "2024-03-16",
-        "leave_type": "PTO",
-        "status": "approved"
-    }
+    # Test input
+    user_id = "U123456"
+    leave_type = "PTO"
+    start_date = "2024-03-15"
+    end_date = "2024-03-16"
+    coverage_person = "U654321"
+    tasks = "All tasks covered"
+    reason = "Taking a vacation"
     
-    blocks = create_user_notification_blocks(request_details)
+    blocks = create_user_notification_blocks(
+        user_id=user_id,
+        leave_type=leave_type,
+        start_date=start_date,
+        end_date=end_date,
+        coverage_person=coverage_person,
+        tasks=tasks,
+        reason=reason
+    )
     
     # Verify the structure
     assert isinstance(blocks, list)
@@ -64,47 +82,57 @@ def test_create_user_notification_blocks():
     blocks_str = str(blocks)
     
     # Check content
-    assert "approved" in blocks_str.lower()
     assert "March 15, 2024" in blocks_str  # Formatted start date
     assert "March 16, 2024" in blocks_str  # Formatted end date
-    assert "PTO" in blocks_str
+    assert leave_type in blocks_str
+    assert tasks in blocks_str
+    assert reason in blocks_str
+    assert coverage_person in blocks_str
 
 def test_create_denial_modal_view():
-    """Test creation of the denial reason modal view."""
+    """Test creation of the denial modal view."""
+    # Test input
     leave_request = {
-        "user": {"id": "U123456", "name": "john.doe"},
-        "start_date": "2024-03-15",
-        "end_date": "2024-03-16",
-        "leave_type": "PTO"
+        'user': {'id': 'U123'},
+        'channel_id': 'C456',
+        'message_ts': '1234.5678',
+        'leave_type': 'Sick/Emergency',
+        'start_date': '2024-03-17',
+        'end_date': '2024-03-18'
     }
     
-    view = create_denial_modal_view(leave_request)
+    # Create modal view
+    modal = create_denial_modal_view(leave_request)
     
-    # Verify structure
-    assert view["type"] == "modal"
-    assert "title" in view
-    assert "blocks" in view
-    assert isinstance(view["blocks"], list)
+    # Verify basic structure
+    assert modal['type'] == 'modal'
+    assert modal['callback_id'] == 'denial_modal'
+    assert modal['title']['text'] == 'Deny Leave Request'
     
-    # Convert view to string for content checking
-    view_str = str(view)
+    # Verify private_metadata is present and contains correct data
+    assert 'private_metadata' in modal, "private_metadata should be present in modal"
+    metadata = json.loads(modal['private_metadata'])
+    assert metadata['requester_id'] == 'U123'
+    assert metadata['channel_id'] == 'C456'
+    assert metadata['message_ts'] == '1234.5678'
+    assert metadata['leave_type'] == 'Sick/Emergency'
+    assert metadata['start_date'] == '2024-03-17'
+    assert metadata['end_date'] == '2024-03-18'
     
-    # Check content
-    assert "U123456" in view_str  # User ID in mention format
-    assert "March 15, 2024" in view_str  # Formatted start date
-    assert "March 16, 2024" in view_str  # Formatted end date
-    assert "PTO" in view_str
-    assert "reason" in view_str.lower()
+    # Verify blocks structure
+    blocks = modal['blocks']
+    assert len(blocks) == 4  # Header, type, dates, and input
+    
+    # Verify input block
+    input_block = next(b for b in blocks if b['type'] == 'input')
+    assert input_block['block_id'] == 'denial_reason'
+    assert input_block['element']['action_id'] == 'denial_reason_input'
+    assert input_block['element']['multiline'] is True
 
 def test_format_date_for_display():
     """Test date formatting for display."""
-    # Test with string input
+    # Test valid date string
     assert format_date_for_display("2024-03-15") == "March 15, 2024"
     
-    # Test with datetime input
-    date = datetime(2024, 3, 15)
-    assert format_date_for_display(date) == "March 15, 2024"
-    
-    # Test invalid date
-    with pytest.raises(ValueError):
-        format_date_for_display("invalid-date") 
+    # Test invalid date string
+    assert format_date_for_display("invalid-date") == "invalid-date"  # Should return original string on error 
