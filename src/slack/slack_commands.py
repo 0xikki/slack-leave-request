@@ -171,7 +171,9 @@ class SlackCommandsHandler:
                             "placeholder": {"type": "plain_text", "text": "Select leave type", "emoji": True},
                             "options": [
                                 {"text": {"type": "plain_text", "text": "PTO", "emoji": True}, "value": "pto"},
-                                {"text": {"type": "plain_text", "text": "Sick Leave", "emoji": True}, "value": "sick"}
+                                {"text": {"type": "plain_text", "text": "Sick/Emergency", "emoji": True}, "value": "sick_emergency"},
+                                {"text": {"type": "plain_text", "text": "Holiday", "emoji": True}, "value": "holiday"},
+                                {"text": {"type": "plain_text", "text": "Offset", "emoji": True}, "value": "offset"}
                             ]
                         },
                         "label": {"type": "plain_text", "text": "Leave Type", "emoji": True}
@@ -253,7 +255,10 @@ class SlackCommandsHandler:
             
             # Extract leave type
             leave_type_block = values.get("leave_type_block", {})
-            leave_type = leave_type_block.get("leave_type", {}).get("selected_option", {}).get("value")
+            leave_type_option = leave_type_block.get("leave_type", {}).get("selected_option", {})
+            leave_type = leave_type_option.get("value")
+            leave_type_display = leave_type_option.get("text", {}).get("text", leave_type)
+            
             if not leave_type:
                 return {
                     "response_action": "errors",
@@ -309,7 +314,7 @@ class SlackCommandsHandler:
                         },
                         {
                             "type": "mrkdwn",
-                            "text": f"*Type:*\n{leave_type}"
+                            "text": f"*Type:*\n{leave_type_display}"
                         },
                         {
                             "type": "mrkdwn",

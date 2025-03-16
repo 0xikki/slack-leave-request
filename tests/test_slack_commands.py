@@ -117,39 +117,54 @@ def test_load_modal_template_fallback(command_handler):
         assert len(modal["blocks"]) > 0
 
 def test_leave_request_notification_format():
-    """Test the format of leave request notifications."""
+    """Test the format of leave request notifications for different leave types."""
     with patch('src.slack.slack_commands.WebClient') as mock_client_class:
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
 
         handler = SlackCommandsHandler(mock_client)
-        handler.handle_modal_submission({
-            "type": "view_submission",
-            "user": {"id": "U123ABC", "name": "testuser"},
-            "view": {
-                "state": {
-                    "values": {
-                        "leave_type_block": {"leave_type": {"selected_option": {"value": "PTO"}}},
-                        "date_block": {
-                            "start_date": {"selected_date": "2024-03-20"}
-                        },
-                        "coverage_block": {"coverage_person": {"selected_user": "U456DEF"}},
-                        "tasks_block": {"tasks": {"value": "Test tasks"}},
-                        "reason_block": {"reason": {"value": "Test reason"}}
+        
+        # Test each leave type
+        leave_types = [
+            ("PTO", "pto"),
+            ("Sick/Emergency", "sick_emergency"),
+            ("Holiday", "holiday"),
+            ("Offset", "offset")
+        ]
+        
+        for display_text, value in leave_types:
+            handler.handle_modal_submission({
+                "type": "view_submission",
+                "user": {"id": "U123ABC", "name": "testuser"},
+                "view": {
+                    "state": {
+                        "values": {
+                            "leave_type_block": {"leave_type": {"selected_option": {"text": {"type": "plain_text", "text": display_text}, "value": value}}},
+                            "date_block": {
+                                "start_date": {"selected_date": "2024-03-20"}
+                            },
+                            "coverage_block": {"coverage_person": {"selected_user": "U456DEF"}},
+                            "tasks_block": {"tasks": {"value": "Test tasks"}},
+                            "reason_block": {"reason": {"value": "Test reason"}}
+                        }
                     }
                 }
-            }
-        })
+            })
 
-        # Verify notification format
-        message_args = mock_client.chat_postMessage.call_args[1]
-        assert "blocks" in message_args
-        blocks = message_args["blocks"]
+            # Verify notification format
+            message_args = mock_client.chat_postMessage.call_args[1]
+            assert "blocks" in message_args
+            blocks = message_args["blocks"]
 
-        # Verify block structure
-        assert len(blocks) > 0
-        assert blocks[0]["type"] == "section"
-        assert "fields" in blocks[0]
+            # Verify block structure
+            assert len(blocks) > 0
+            assert blocks[0]["type"] == "section"
+            assert "fields" in blocks[0]
+            
+            # Verify leave type is correctly displayed
+            type_field = next(field for field in blocks[0]["fields"] if "*Type:*" in field["text"])
+            assert display_text in type_field["text"], f"Expected '{display_text}' in notification, but got '{type_field['text']}'"
+            assert value not in type_field["text"], f"Found value '{value}' in notification when it should show display text"
 
 def test_handle_timeoff_command(command_handler, sample_command_payload):
     """Test handling of the /timeoff command."""

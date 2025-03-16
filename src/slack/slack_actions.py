@@ -209,13 +209,15 @@ class SlackActionsHandler:
             values = view.get("state", {}).get("values", {})
             
             # Extract form values
-            leave_type = values.get("leave_type_block", {}).get("leave_type", {}).get("selected_option", {}).get("value")
+            leave_type_option = values.get("leave_type_block", {}).get("leave_type", {}).get("selected_option", {})
+            leave_type = leave_type_option.get("value")
+            leave_type_display = leave_type_option.get("text", {}).get("text", leave_type)
             start_date = values.get("date_block", {}).get("start_date", {}).get("selected_date")
             coverage_person = values.get("coverage_block", {}).get("coverage_person", {}).get("selected_user")
             tasks = values.get("tasks_block", {}).get("tasks", {}).get("value")
             reason = values.get("reason_block", {}).get("reason", {}).get("value")
             
-            logger.info(f"Processing leave request for user {user.get('id')} of type {leave_type}")
+            logger.info(f"Processing leave request for user {user.get('id')} of type {leave_type_display}")
             
             # Create notification blocks with approval/rejection buttons
             notification_blocks = [
@@ -223,7 +225,7 @@ class SlackActionsHandler:
                     "type": "section",
                     "fields": [
                         {"type": "mrkdwn", "text": f"*Requester:*\n<@{user.get('id')}>"},
-                        {"type": "mrkdwn", "text": f"*Type:*\n{leave_type}"},
+                        {"type": "mrkdwn", "text": f"*Type:*\n{leave_type_display}"},
                         {"type": "mrkdwn", "text": f"*Start Date:*\n{start_date}"},
                         {"type": "mrkdwn", "text": f"*Coverage:*\n<@{coverage_person}>"}
                     ]
@@ -262,7 +264,7 @@ class SlackActionsHandler:
                                 },
                                 "text": {
                                     "type": "mrkdwn",
-                                    "text": f"Are you sure you want to approve this {leave_type} request from <@{user.get('id')}>?"
+                                    "text": f"Are you sure you want to approve this {leave_type_display} request from <@{user.get('id')}>?"
                                 },
                                 "confirm": {
                                     "type": "plain_text",
@@ -295,7 +297,7 @@ class SlackActionsHandler:
                                 },
                                 "text": {
                                     "type": "mrkdwn",
-                                    "text": f"Are you sure you want to reject this {leave_type} request from <@{user.get('id')}>?\nThis will open a dialog to provide a rejection reason."
+                                    "text": f"Are you sure you want to reject this {leave_type_display} request from <@{user.get('id')}>?\nThis will open a dialog to provide a rejection reason."
                                 },
                                 "confirm": {
                                     "type": "plain_text",
@@ -327,7 +329,7 @@ class SlackActionsHandler:
             try:
                 self.client.chat_postMessage(
                     channel=user.get("id"),
-                    text=f"Your {leave_type} request has been submitted",
+                    text=f"Your {leave_type_display} request has been submitted",
                     blocks=user_blocks
                 )
                 logger.info(f"Sent confirmation to user {user.get('id')}")
@@ -346,7 +348,7 @@ class SlackActionsHandler:
                     try:
                         self.client.chat_postMessage(
                             channel=HR_CHANNEL_ID,
-                            text=f"New {leave_type} request from Department Head <@{user_id}>",
+                            text=f"New {leave_type_display} request from Department Head <@{user_id}>",
                             blocks=notification_blocks
                         )
                         logger.info(f"Successfully sent request to HR channel {HR_CHANNEL_ID}")
@@ -363,7 +365,7 @@ class SlackActionsHandler:
                     try:
                         self.client.chat_postMessage(
                             channel=dept_head,
-                            text=f"New {leave_type} request from <@{user_id}>",
+                            text=f"New {leave_type_display} request from <@{user_id}>",
                             blocks=notification_blocks
                         )
                         logger.info(f"Successfully sent request to department head {dept_head}")
@@ -376,7 +378,7 @@ class SlackActionsHandler:
                         try:
                             self.client.chat_postMessage(
                                 channel=HR_CHANNEL_ID,
-                                text=f"New {leave_type} request from <@{user_id}> (No department head found)",
+                                text=f"New {leave_type_display} request from <@{user_id}> (No department head found)",
                                 blocks=notification_blocks
                             )
                             logger.info(f"Successfully sent request to HR channel {HR_CHANNEL_ID}")
@@ -522,7 +524,8 @@ class SlackActionsHandler:
 
             # Extract leave type from the second field
             leave_type_text = fields[1].get("text", "")
-            leave_type = leave_type_text.split("\n")[-1] if "\n" in leave_type_text else ""
+            # Get the text after the "*Type:*\n" label
+            leave_type = leave_type_text.split("*Type:*\n")[-1] if "*Type:*\n" in leave_type_text else ""
             logger.info(f"Extracted leave_type: {leave_type}")
 
             # Extract start date from the third field
@@ -666,7 +669,7 @@ class SlackActionsHandler:
             trigger_id=trigger_id,
             view=create_denial_modal_view({
                 "user": {"id": request_details.get("requester_id")},
-                "leave_type": request_details.get("leave_type", "Unknown"),
+                "leave_type": request_details.get("leave_type"),
                 "start_date": request_details.get("start_date", ""),
                 "end_date": request_details.get("end_date", "")
             })
