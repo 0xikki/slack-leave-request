@@ -47,7 +47,10 @@ class SlackActionsHandler:
 
                 if not action_id or not user_id:
                     logger.error("Missing action_id or user_id")
-                    return {"text": "Invalid action"}
+                    return {
+                        "response_action": "errors",
+                        "errors": {"action": "Invalid action"}
+                    }
 
                 # Get container info first
                 container = payload.get("container", {})
@@ -56,13 +59,19 @@ class SlackActionsHandler:
 
                 if not channel_id or not message_ts:
                     logger.error(f"Missing container info: channel_id={channel_id}, message_ts={message_ts}")
-                    return {"text": "Could not process request"}
+                    return {
+                        "response_action": "errors",
+                        "errors": {"action": "Could not extract request details"}
+                    }
 
                 # Extract request details from message
                 message = payload.get("message", {})
                 if not message:
                     logger.error("No message found in payload")
-                    return {"text": "Could not process request"}
+                    return {
+                        "response_action": "errors",
+                        "errors": {"action": "Could not extract request details"}
+                    }
 
                 # Add container info to message for _extract_request_details
                 message["container"] = container
@@ -70,7 +79,10 @@ class SlackActionsHandler:
                 request_details = self._extract_request_details(message)
                 if not request_details:
                     logger.error("Could not extract request details from message")
-                    return {"text": "Could not process request"}
+                    return {
+                        "response_action": "errors",
+                        "errors": {"action": "Could not extract request details"}
+                    }
 
                 # Check authorization
                 requester_id = request_details.get("requester_id")
@@ -80,38 +92,92 @@ class SlackActionsHandler:
                     logger.info(f"User {user_id} is trying to handle their own request. Admin users: {admin_users}")
                     if user_id not in admin_users:
                         logger.error(f"User {user_id} tried to handle their own request but is not an admin")
-                        return {"text": "You cannot approve or reject your own request unless you are a super admin"}
+                        return {
+                            "response_action": "errors",
+                            "errors": {"action": "You cannot approve or reject your own request"}
+                        }
 
                 if not self._is_authorized(user_id, requester_id):
                     logger.error(f"User {user_id} is not authorized to perform this action")
-                    return {"text": "You are not authorized to perform this action"}
+                    return {
+                        "response_action": "errors",
+                        "errors": {"action": "You are not authorized to perform this action"}
+                    }
 
                 # Handle different actions
                 try:
                     if action_id == "approve_leave":
                         logger.info(f"Processing approval from user {user_id}")
                         # Process approval immediately
-                        self._handle_approval(payload, request_details)
+                        if not self._handle_approval(payload, request_details):
+                            return {
+                                "response_action": "errors",
+                                "errors": {"action": "An error occurred while processing your request"}
+                            }
                         # Return empty response to acknowledge
-                        return {}
+                        return {"response_action": "clear"}
 
                     elif action_id == "reject_leave":
                         if not payload.get("trigger_id"):
                             logger.error("Missing trigger_id for rejection modal")
-                            return {"text": "Could not open rejection dialog"}
-                        logger.info(f"Opening rejection modal for user {user_id}")
-                        self._handle_rejection(payload, request_details)
-                        return {}  # Empty response for success
+                            return {
+                                "response_action": "errors",
+                                "errors": {"action": "Could not open rejection modal"}
+                            }
+
+                        # Create leave request object for modal
+                        leave_request = {
+                            "user": {"id": request_details["requester_id"]},
+                            "channel_id": request_details["channel_id"],
+                            "message_ts": request_details["message_ts"],
+                            "leave_type": request_details["leave_type"],
+                            "start_date": request_details["start_date"],
+                            "end_date": request_details["end_date"]
+                        }
+
+                        # Create and open the rejection modal
+                        modal_view = create_denial_modal_view(leave_request)
+
+                        try:
+                            self.client.views_open(
+                                trigger_id=payload["trigger_id"],
+                                view=modal_view
+                            )
+                            return {"response_action": "clear"}
+                        except Exception as e:
+                            logger.error(f"Error opening rejection modal: {str(e)}", exc_info=True)
+                            return {
+                                "response_action": "errors",
+                                "errors": {"action": "Could not open rejection modal"}
+                            }
+
+                    else:
+                        logger.error(f"Invalid action_id: {action_id}")
+                        return {
+                            "response_action": "errors",
+                            "errors": {"action": "Invalid action"}
+                        }
 
                 except Exception as e:
-                    logger.error(f"Error handling action: {str(e)}", exc_info=True)
-                    return {"text": f"Error: {str(e)}"}
+                    logger.error(f"Error processing action: {str(e)}", exc_info=True)
+                    return {
+                        "response_action": "errors",
+                        "errors": {"action": "An error occurred while processing your request"}
+                    }
 
-                return {}  # Default empty response for unhandled action_id
+            else:
+                logger.error(f"Invalid payload type: {payload_type}")
+                return {
+                    "response_action": "errors",
+                    "errors": {"action": "Invalid payload type"}
+                }
 
         except Exception as e:
             logger.error(f"Error handling action: {str(e)}", exc_info=True)
-            return {"text": "An error occurred"}
+            return {
+                "response_action": "errors",
+                "errors": {"action": "An error occurred while processing your request"}
+            }
 
     def handle_view_submission(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Handle view submission."""
@@ -119,27 +185,64 @@ class SlackActionsHandler:
             view = payload.get("view", {})
             callback_id = view.get("callback_id")
             
-            if callback_id == "rejection_modal":
-                # Quick validation first
-                values = view.get("state", {}).get("values", {})
-                rejection_block = values.get("rejection_reason_block", {})
-                if not rejection_block.get("rejection_reason", {}).get("value"):
+            logger.info(f"Handling view submission with callback_id: {callback_id}")
+            logger.info(f"View payload: {json.dumps(view)}")
+            
+            # For any modal submission, we'll process it
+            # Quick validation first
+            values = view.get("state", {}).get("values", {})
+            
+            # Check if this is a denial reason submission based on view structure
+            if callback_id == "denial_modal" or (
+                not callback_id and  # Fallback check if callback_id is missing
+                "denial_reason" in values and
+                values.get("denial_reason", {}).get("denial_reason_input")
+            ):
+                # Get private metadata first
+                try:
+                    metadata_str = view.get("private_metadata", "{}")
+                    logger.info(f"Processing denial with metadata string: {metadata_str}")
+                    metadata = json.loads(metadata_str)
+                    logger.info(f"Decoded metadata: {json.dumps(metadata)}")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to decode private metadata: {str(e)}")
                     return {
                         "response_action": "errors",
                         "errors": {
-                            "rejection_reason_block": "Please provide a reason for rejection"
+                            "submission": "Invalid request metadata. Please try again."
+                        }
+                    }
+
+                # Validate required metadata
+                required_fields = ["requester_id", "channel_id", "message_ts"]
+                missing_fields = [field for field in required_fields if not metadata.get(field)]
+                if missing_fields:
+                    logger.error(f"Missing required metadata fields: {missing_fields}")
+                    return {
+                        "response_action": "errors",
+                        "errors": {
+                            "submission": "Invalid request data. Please try again."
+                        }
+                    }
+
+                # Extract and validate denial reason
+                denial_reason = values.get("denial_reason", {}).get("denial_reason_input", {}).get("value")
+                if not denial_reason:
+                    logger.error("Missing denial reason in submission")
+                    return {
+                        "response_action": "errors",
+                        "errors": {
+                            "denial_reason": "Please provide a reason for rejection"
                         }
                     }
                 
                 # Queue processing and return empty response immediately
                 self._queue_rejection_processing(payload)
+                logger.info("Successfully queued rejection processing")
                 return {}  # Empty response to close modal per Slack's requirements
                 
             elif callback_id == "leave_request_modal":
                 # Extract form values for quick validation
-                values = view.get("state", {}).get("values", {})
-                
-                # Do quick validation first
                 errors = self._validate_leave_request(values)
                 if errors:
                     return {
@@ -155,7 +258,7 @@ class SlackActionsHandler:
             return {}  # Empty response per Slack's requirements
             
         except Exception as e:
-            logger.error(f"Error handling view submission: {str(e)}")
+            logger.error(f"Error handling view submission: {str(e)}", exc_info=True)
             return {
                 "response_action": "errors",
                 "errors": {
@@ -411,16 +514,37 @@ class SlackActionsHandler:
         try:
             view = payload.get("view", {})
             values = view.get("state", {}).get("values", {})
-            metadata = json.loads(view.get("private_metadata", "{}"))
             
-            rejection_reason = values.get("rejection_reason_block", {}).get("rejection_reason", {}).get("value")
+            # Get private metadata
+            try:
+                metadata_str = view.get("private_metadata", "{}")
+                logger.info(f"Processing rejection with metadata string: {metadata_str}")
+                metadata = json.loads(metadata_str)
+                logger.info(f"Decoded metadata: {json.dumps(metadata)}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to decode private metadata: {str(e)}")
+                return
+            
+            # Extract rejection reason using the block and action IDs
+            denial_reason = values.get("denial_reason", {}).get("denial_reason_input", {}).get("value")
+            
+            # Extract metadata
             channel_id = metadata.get("channel_id")
             message_ts = metadata.get("message_ts")
             requester_id = metadata.get("requester_id")
+            leave_type = metadata.get("leave_type")
+            start_date = metadata.get("start_date")
+            end_date = metadata.get("end_date", start_date)  # Default to start_date if no end_date
             
-            if all([channel_id, message_ts, requester_id, rejection_reason]):
-                # Update original message
-                self.client.chat_update(
+            if not all([channel_id, message_ts, requester_id, denial_reason]):
+                logger.error(f"Missing required fields for rejection processing: channel_id={channel_id}, message_ts={message_ts}, requester_id={requester_id}, denial_reason={denial_reason}")
+                return
+            
+            logger.info(f"Updating message in channel {channel_id} at {message_ts}")
+            
+            # Update original message
+            try:
+                update_response = self.client.chat_update(
                     channel=channel_id,
                     ts=message_ts,
                     text=f"Leave request from <@{requester_id}> was rejected",
@@ -429,14 +553,26 @@ class SlackActionsHandler:
                             "type": "section",
                             "text": {
                                 "type": "mrkdwn",
-                                "text": f":x: Leave request from <@{requester_id}> was rejected\n*Reason:* {rejection_reason}"
+                                "text": f":x: Leave request from <@{requester_id}> was rejected\n*Reason:* {denial_reason}"
                             }
+                        },
+                        {
+                            "type": "section",
+                            "fields": [
+                                {"type": "mrkdwn", "text": f"*Type:*\n{leave_type}"},
+                                {"type": "mrkdwn", "text": f"*Duration:*\n{start_date} to {end_date}"}
+                            ]
                         }
                     ]
                 )
-                
-                # Notify requester
-                self.client.chat_postMessage(
+                logger.info(f"Successfully updated original message: {json.dumps(update_response)}")
+            except SlackApiError as e:
+                logger.error(f"Failed to update original message: {str(e)}")
+                # Don't raise here, try to notify the user anyway
+            
+            # Notify requester
+            try:
+                notify_response = self.client.chat_postMessage(
                     channel=requester_id,
                     text="Your leave request was rejected",
                     blocks=[
@@ -444,13 +580,43 @@ class SlackActionsHandler:
                             "type": "section",
                             "text": {
                                 "type": "mrkdwn",
-                                "text": f":x: Your leave request was rejected\n*Reason:* {rejection_reason}"
+                                "text": f":x: Your leave request was rejected\n*Reason:* {denial_reason}"
                             }
+                        },
+                        {
+                            "type": "section",
+                            "fields": [
+                                {"type": "mrkdwn", "text": f"*Type:*\n{leave_type}"},
+                                {"type": "mrkdwn", "text": f"*Duration:*\n{start_date} to {end_date}"}
+                            ]
                         }
                     ]
                 )
+                logger.info(f"Successfully notified requester: {json.dumps(notify_response)}")
+            except SlackApiError as e:
+                logger.error(f"Failed to notify requester: {str(e)}")
+                # If we failed to notify the user, try one more time with a simple message
+                try:
+                    self.client.chat_postMessage(
+                        channel=requester_id,
+                        text=f"Your {leave_type} request for {start_date} was rejected. Reason: {denial_reason}"
+                    )
+                except SlackApiError:
+                    logger.error("Failed to send fallback notification to requester", exc_info=True)
+            
+            logger.info(f"Successfully processed rejection for user {requester_id}")
+            
         except Exception as e:
-            logger.error(f"Error processing rejection: {str(e)}")
+            logger.error(f"Error processing rejection: {str(e)}", exc_info=True)
+            # Try to notify user of error if we have their ID
+            if requester_id:
+                try:
+                    self.client.chat_postMessage(
+                        channel=requester_id,
+                        text="There was an error processing your leave request rejection. Please contact HR or try again."
+                    )
+                except:
+                    logger.error("Failed to send error notification to user", exc_info=True)
 
     def _is_authorized(self, user_id: str, requester_id: str) -> bool:
         """Check if user is authorized to approve/reject the request."""
@@ -499,7 +665,7 @@ class SlackActionsHandler:
                 logger.error("No blocks found in message")
                 return None
 
-            # First block should contain the requester and leave type
+            # First block should contain the requester, type, dates, and coverage
             first_block = next((b for b in blocks if b.get("type") == "section" and b.get("fields")), None)
             if not first_block:
                 logger.error("Could not find section block with fields")
@@ -508,7 +674,7 @@ class SlackActionsHandler:
             fields = first_block.get("fields", [])
             logger.info(f"Found fields in first block: {json.dumps(fields)}")
             
-            if len(fields) < 3:
+            if len(fields) < 4:  # We expect at least 4 fields (requester, type, start date, coverage)
                 logger.error(f"Not enough fields in block: {json.dumps(fields)}")
                 return None
 
@@ -524,21 +690,32 @@ class SlackActionsHandler:
 
             # Extract leave type from the second field
             leave_type_text = fields[1].get("text", "")
-            # Get the text after the "*Type:*\n" label
             leave_type = leave_type_text.split("*Type:*\n")[-1] if "*Type:*\n" in leave_type_text else ""
             logger.info(f"Extracted leave_type: {leave_type}")
 
             # Extract start date from the third field
             start_date_text = fields[2].get("text", "")
-            start_date = start_date_text.split("\n")[-1] if "\n" in start_date_text else ""
+            start_date = start_date_text.split("*Start Date:*\n")[-1] if "*Start Date:*\n" in start_date_text else ""
             logger.info(f"Extracted start_date: {start_date}")
+
+            # Look for end date in subsequent blocks if not in first block
+            end_date = start_date  # Default to start date if no end date found
+            for block in blocks:
+                if block.get("type") == "section" and block.get("fields"):
+                    for field in block.get("fields", []):
+                        field_text = field.get("text", "")
+                        if "*End Date:*" in field_text:
+                            end_date = field_text.split("*End Date:*\n")[-1]
+                            logger.info(f"Extracted end_date: {end_date}")
+                            break
 
             details = {
                 "requester_id": requester_id,
                 "channel_id": channel_id,
                 "message_ts": message_ts,
                 "leave_type": leave_type,
-                "start_date": start_date
+                "start_date": start_date,
+                "end_date": end_date
             }
             
             logger.info(f"Successfully extracted request details: {json.dumps(details)}")
@@ -555,7 +732,7 @@ class SlackActionsHandler:
         thread.daemon = True
         thread.start()
 
-    def _handle_approval(self, payload: Dict[str, Any], request_details: Dict[str, Any]) -> None:
+    def _handle_approval(self, payload: Dict[str, Any], request_details: Dict[str, Any]) -> bool:
         """Handle leave request approval."""
         try:
             channel_id = request_details.get("channel_id")
@@ -601,7 +778,7 @@ class SlackActionsHandler:
                 logger.info("Successfully updated original message")
             except SlackApiError as e:
                 logger.error(f"Failed to update original message: {str(e.response)}")
-                raise
+                return False
 
             # Then, send a confirmation to the requester
             try:
@@ -628,49 +805,10 @@ class SlackActionsHandler:
                 logger.info(f"Successfully sent approval notification to user {requester_id}")
             except SlackApiError as e:
                 logger.error(f"Failed to send notification to requester: {str(e.response)}")
-                # Don't raise here - we've already updated the original message
+                # Don't return False here - we've already updated the original message
 
-            # If we have a response_url, acknowledge the action
-            response_url = payload.get("response_url")
-            if response_url:
-                try:
-                    import requests
-                    requests.post(
-                        response_url,
-                        json={
-                            "text": "Request approved successfully",
-                            "response_type": "ephemeral",
-                            "replace_original": False
-                        }
-                    )
-                    logger.info("Successfully sent response_url acknowledgment")
-                except Exception as e:
-                    logger.error(f"Failed to acknowledge confirmation: {str(e)}")
+            return True
 
         except Exception as e:
-            error_msg = f"Error processing approval: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            try:
-                self.client.chat_postMessage(
-                    channel=requester_id,
-                    text=error_msg
-                )
-            except:
-                logger.error("Failed to send error notification to user", exc_info=True)
-
-    def _handle_rejection(self, payload: Dict[str, Any], request_details: Dict[str, Any]) -> None:
-        """Handle leave request rejection."""
-        trigger_id = payload.get("trigger_id")
-        if not trigger_id:
-            raise ValueError("Missing trigger_id")
-
-        # Open rejection reason modal
-        self.client.views_open(
-            trigger_id=trigger_id,
-            view=create_denial_modal_view({
-                "user": {"id": request_details.get("requester_id")},
-                "leave_type": request_details.get("leave_type"),
-                "start_date": request_details.get("start_date", ""),
-                "end_date": request_details.get("end_date", "")
-            })
-        )
+            logger.error(f"Error processing approval: {str(e)}", exc_info=True)
+            return False
