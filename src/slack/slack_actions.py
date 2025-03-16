@@ -511,6 +511,7 @@ class SlackActionsHandler:
 
     def _process_rejection(self, payload: Dict[str, Any]) -> None:
         """Process rejection in background."""
+        requester_id = None
         try:
             view = payload.get("view", {})
             values = view.get("state", {}).get("values", {})
@@ -523,10 +524,12 @@ class SlackActionsHandler:
                 logger.info(f"Decoded metadata: {json.dumps(metadata)}")
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to decode private metadata: {str(e)}")
-                return
+                raise ValueError("Invalid metadata format")
             
             # Extract rejection reason using the block and action IDs
             denial_reason = values.get("denial_reason", {}).get("denial_reason_input", {}).get("value")
+            if not denial_reason:
+                raise ValueError("Missing denial reason")
             
             # Extract metadata
             channel_id = metadata.get("channel_id")
@@ -536,11 +539,11 @@ class SlackActionsHandler:
             start_date = metadata.get("start_date")
             end_date = metadata.get("end_date", start_date)  # Default to start_date if no end_date
             
-            if not all([channel_id, message_ts, requester_id, denial_reason]):
-                logger.error(f"Missing required fields for rejection processing: channel_id={channel_id}, message_ts={message_ts}, requester_id={requester_id}, denial_reason={denial_reason}")
-                return
+            if not all([channel_id, message_ts, requester_id]):
+                missing = [k for k, v in {'channel_id': channel_id, 'message_ts': message_ts, 'requester_id': requester_id}.items() if not v]
+                raise ValueError(f"Missing required fields: {', '.join(missing)}")
             
-            logger.info(f"Updating message in channel {channel_id} at {message_ts}")
+            logger.info(f"Processing rejection for user {requester_id} in channel {channel_id}")
             
             # Update original message
             try:
@@ -568,9 +571,9 @@ class SlackActionsHandler:
                 logger.info(f"Successfully updated original message: {json.dumps(update_response)}")
             except SlackApiError as e:
                 logger.error(f"Failed to update original message: {str(e)}")
-                # Don't raise here, try to notify the user anyway
+                # Continue to notify user even if update fails
             
-            # Notify requester
+            # Notify requester with rich message first
             try:
                 notify_response = self.client.chat_postMessage(
                     channel=requester_id,
@@ -592,31 +595,37 @@ class SlackActionsHandler:
                         }
                     ]
                 )
-                logger.info(f"Successfully notified requester: {json.dumps(notify_response)}")
+                logger.info(f"Successfully notified requester with rich message: {json.dumps(notify_response)}")
+                return  # Exit successfully after sending rich notification
             except SlackApiError as e:
-                logger.error(f"Failed to notify requester: {str(e)}")
-                # If we failed to notify the user, try one more time with a simple message
-                try:
-                    self.client.chat_postMessage(
-                        channel=requester_id,
-                        text=f"Your {leave_type} request for {start_date} was rejected. Reason: {denial_reason}"
-                    )
-                except SlackApiError:
-                    logger.error("Failed to send fallback notification to requester", exc_info=True)
+                logger.error(f"Failed to send rich notification to requester: {str(e)}")
+                # Fall through to simple message
             
-            logger.info(f"Successfully processed rejection for user {requester_id}")
+            # If rich message fails, try simple message
+            try:
+                simple_response = self.client.chat_postMessage(
+                    channel=requester_id,
+                    text=f"Your {leave_type} request for {start_date} was rejected. Reason: {denial_reason}"
+                )
+                logger.info(f"Successfully sent simple notification to requester: {json.dumps(simple_response)}")
+                return  # Exit successfully after sending simple notification
+            except SlackApiError as e:
+                logger.error(f"Failed to send simple notification to requester: {str(e)}")
+                raise  # Re-raise if both notification attempts fail
             
         except Exception as e:
-            logger.error(f"Error processing rejection: {str(e)}", exc_info=True)
-            # Try to notify user of error if we have their ID
+            error_msg = str(e)
+            logger.error(f"Error processing rejection: {error_msg}", exc_info=True)
             if requester_id:
                 try:
+                    # Send a more specific error message
+                    error_detail = "metadata error" if "metadata" in error_msg.lower() else "notification error"
                     self.client.chat_postMessage(
                         channel=requester_id,
-                        text="There was an error processing your leave request rejection. Please contact HR or try again."
+                        text=f"There was a {error_detail} while processing your leave request rejection. Please try again or contact HR if the issue persists."
                     )
-                except:
-                    logger.error("Failed to send error notification to user", exc_info=True)
+                except Exception as notify_error:
+                    logger.error(f"Failed to send error notification to user: {str(notify_error)}", exc_info=True)
 
     def _is_authorized(self, user_id: str, requester_id: str) -> bool:
         """Check if user is authorized to approve/reject the request."""
