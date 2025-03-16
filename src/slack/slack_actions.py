@@ -237,9 +237,19 @@ class SlackActionsHandler:
                     }
                 
                 # Queue processing and return empty response immediately
-                self._queue_rejection_processing(payload)
-                logger.info("Successfully queued rejection processing")
-                return {}  # Empty response to close modal per Slack's requirements
+                try:
+                    self._queue_rejection_processing(payload)
+                    logger.info("Successfully queued rejection processing")
+                    # Return empty response to close the modal
+                    return {}
+                except Exception as e:
+                    logger.error(f"Error queueing rejection: {str(e)}", exc_info=True)
+                    return {
+                        "response_action": "errors",
+                        "errors": {
+                            "submission": "Failed to process rejection. Please try again."
+                        }
+                    }
                 
             elif callback_id == "leave_request_modal":
                 # Extract form values for quick validation
@@ -251,11 +261,21 @@ class SlackActionsHandler:
                     }
                 
                 # Queue processing and return empty response immediately
-                self._queue_leave_request_processing(payload)
-                return {}  # Empty response to close modal per Slack's requirements
+                try:
+                    self._queue_leave_request_processing(payload)
+                    logger.info("Successfully queued leave request processing")
+                    return {}
+                except Exception as e:
+                    logger.error(f"Error queueing leave request: {str(e)}", exc_info=True)
+                    return {
+                        "response_action": "errors",
+                        "errors": {
+                            "submission": "Failed to process request. Please try again."
+                        }
+                    }
             
             # For any other modal, just close it
-            return {}  # Empty response per Slack's requirements
+            return {}
             
         except Exception as e:
             logger.error(f"Error handling view submission: {str(e)}", exc_info=True)
